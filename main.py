@@ -84,6 +84,7 @@ def send_review_request(
     customer_name: str = Form(...),
     customer_contact: str = Form(...),
     contact_type: str = Form(...),
+    carrier: str = Form(""),
     db: Session = Depends(get_db),
 ):
     biz = db.query(Business).filter(Business.id == business_id).first()
@@ -135,6 +136,7 @@ def send_review_request(
                 f"Hi {customer_name}! Thanks for visiting {biz.name}. "
                 f"We'd love a quick Google review: {link}"
             ),
+            carrier=carrier.strip(),
         )
 
     if sent:

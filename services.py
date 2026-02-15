@@ -60,19 +60,59 @@ def send_email(to: str, subject: str, body: str) -> bool:
     return True
 
 
-def send_sms(to: str, body: str) -> bool:
+SMS_GATEWAYS = {
+    "tmobile": "tmomail.net",      # T-Mobile / Mint / Metro
+    "att": "txt.att.net",           # AT&T / Cricket
+    "verizon": "vtext.com",         # Verizon
+    "sprint": "messaging.sprintpcs.com",  # Sprint / legacy
+}
+
+
+def send_sms_via_email(to: str, body: str, carrier: str) -> bool:
+    """Send SMS through carrier email-to-SMS gateway using existing SMTP."""
+    gateway = SMS_GATEWAYS.get(carrier)
+    if not gateway:
+        print(f"[SMS-GW SKIP] Unknown carrier: {carrier}")
+        return False
+
+    # Strip non-digits from phone number
+    digits = "".join(c for c in to if c.isdigit())
+    if digits.startswith("1") and len(digits) == 11:
+        digits = digits[1:]  # remove country code
+    if len(digits) != 10:
+        print(f"[SMS-GW ERROR] Invalid US phone number: {to}")
+        return False
+
+    sms_email = f"{digits}@{gateway}"
+    try:
+        # Reuse existing send_email — plain text, no subject needed
+        return send_email(to=sms_email, subject="", body=body)
+    except Exception as e:
+        print(f"[SMS-GW ERROR] To: {sms_email} | Error: {e}")
+        return False
+
+
+def send_sms(to: str, body: str, carrier: str = "") -> bool:
+    """Send SMS via Twilio if configured, otherwise fall back to email gateway."""
     sid = os.getenv("TWILIO_ACCOUNT_SID")
     token = os.getenv("TWILIO_AUTH_TOKEN")
     from_num = os.getenv("TWILIO_FROM_NUMBER")
-    if not all([sid, token, from_num]):
-        print(f"[SMS SKIP] Twilio not configured. To: {to} | Body: {body}")
-        return False
-    try:
-        from twilio.rest import Client
 
-        msg = Client(sid, token).messages.create(body=body, from_=from_num, to=to)
-        print(f"[SMS SENT] To: {to} | SID: {msg.sid} | Status: {msg.status}")
-        return True
-    except Exception as e:
-        print(f"[SMS ERROR] To: {to} | Error: {e}")
-        return False
+    # Try Twilio first
+    if all([sid, token, from_num]):
+        try:
+            from twilio.rest import Client
+
+            msg = Client(sid, token).messages.create(body=body, from_=from_num, to=to)
+            print(f"[SMS SENT] To: {to} | SID: {msg.sid} | Status: {msg.status}")
+            return True
+        except Exception as e:
+            print(f"[SMS ERROR] Twilio failed: {e}")
+
+    # Fall back to email-to-SMS gateway
+    if carrier:
+        print(f"[SMS] Falling back to email gateway (carrier={carrier})")
+        return send_sms_via_email(to, body, carrier)
+
+    print(f"[SMS SKIP] No Twilio and no carrier specified. To: {to}")
+    return False

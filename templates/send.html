@@ -42,6 +42,17 @@
             </label>
         </div>
     </div>
+    <div id="carrier-group" style="display:none;">
+        <label class="block text-sm font-medium text-gray-700 mb-1">Phone Carrier</label>
+        <select name="carrier"
+                class="w-full border rounded px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500">
+            <option value="tmobile">T-Mobile / Mint / Metro</option>
+            <option value="att">AT&T / Cricket</option>
+            <option value="verizon">Verizon</option>
+            <option value="sprint">Sprint</option>
+        </select>
+        <p class="text-xs text-gray-500 mt-1">Used for email-to-SMS gateway when Twilio is not configured.</p>
+    </div>
     <div>
         <label class="block text-sm font-medium text-gray-700 mb-1">Email or Phone</label>
         <input type="text" name="customer_contact" required
@@ -59,4 +70,13 @@
     <a href="/portal/setup" class="underline">Add one first &rarr;</a>
 </div>
 {% endif %}
+
+<script>
+document.querySelectorAll('input[name="contact_type"]').forEach(r => {
+    r.addEventListener('change', () => {
+        document.getElementById('carrier-group').style.display =
+            document.querySelector('input[name="contact_type"]:checked').value === 'sms' ? '' : 'none';
+    });
+});
+</script>
 {% endblock %}
