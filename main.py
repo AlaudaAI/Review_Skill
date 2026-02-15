@@ -150,7 +150,10 @@ def send_review_request(
             },
         )
     else:
-        hint = "Set SMTP_USER and SMTP_PASSWORD in .env" if contact_type == "email" else "Set TWILIO vars in .env"
+        if contact_type == "email":
+            hint = "Set SMTP_USER and SMTP_PASSWORD in .env"
+        else:
+            hint = "Set SMTP vars in .env (for email gateway) or TWILIO vars (for Twilio)"
         return templates.TemplateResponse(
             "send.html",
             {
