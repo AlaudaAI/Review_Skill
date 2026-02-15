@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Leave a Review for {{ business_name }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center p-4">
+    <div class="max-w-sm w-full bg-white rounded-xl shadow-lg p-6 text-center">
+        <h1 class="text-xl font-bold mb-2">{{ business_name }}</h1>
+        <p class="text-gray-500 text-sm mb-5">Thanks for your visit! Here's a review ready for you.</p>
+
+        <div id="review-box" class="bg-gray-50 border rounded-lg p-3 mb-4 text-sm text-left text-gray-700 leading-relaxed">
+            {{ review_text }}
+        </div>
+
+        <div id="status" class="text-sm mb-4 text-gray-500">Copying review to clipboard...</div>
+
+        <button id="copy-btn" onclick="doCopy()"
+                class="hidden w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 mb-4">
+            Copy Review Text
+        </button>
+
+        <a id="open-link" href="https://search.google.com/local/writereview?placeid={{ google_place_id }}"
+           class="hidden w-full inline-block bg-green-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-green-700 mb-5">
+            Open Google Reviews
+        </a>
+
+        <div class="text-xs text-gray-400 text-left">
+            <p class="font-medium text-gray-500 mb-1">Steps:</p>
+            <ol class="list-decimal list-inside space-y-0.5">
+                <li>Review text is copied to your clipboard</li>
+                <li>Tap 5 stars</li>
+                <li>Long-press &rarr; Paste the review</li>
+                <li>Submit!</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        const reviewText = {{ review_text | tojson }};
+        const reviewUrl = "https://search.google.com/local/writereview?placeid={{ google_place_id }}";
+
+        function showManual() {
+            document.getElementById('status').textContent = 'Tap the button below to copy, then open Google Reviews.';
+            document.getElementById('copy-btn').classList.remove('hidden');
+            document.getElementById('open-link').classList.remove('hidden');
+        }
+
+        async function doCopy() {
+            try {
+                await navigator.clipboard.writeText(reviewText);
+                document.getElementById('copy-btn').textContent = 'Copied!';
+                document.getElementById('copy-btn').classList.replace('bg-blue-600', 'bg-gray-400');
+                document.getElementById('open-link').classList.remove('hidden');
+            } catch (e) {
+                // fallback: select text for manual copy
+                const range = document.createRange();
+                range.selectNodeContents(document.getElementById('review-box'));
+                window.getSelection().removeAllRanges();
+                window.getSelection().addRange(range);
+                document.getElementById('status').textContent = 'Please copy the highlighted text manually.';
+                document.getElementById('open-link').classList.remove('hidden');
+            }
+        }
+
+        // Try auto-copy on page load
+        (async () => {
+            try {
+                await navigator.clipboard.writeText(reviewText);
+                document.getElementById('status').innerHTML = '<span class="text-green-600 font-medium">Review copied!</span> Redirecting to Google Maps...';
+                setTimeout(() => { window.location.href = reviewUrl; }, 2000);
+            } catch (e) {
+                showManual();
+            }
+        })();
+    </script>
+</body>
+</html>
