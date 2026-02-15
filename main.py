@@ -23,7 +23,12 @@ app = FastAPI(title="Review Boost")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
+# Will be set dynamically by ngrok tunnel at startup, or from env
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
+
+
+def get_base_url() -> str:
+    return BASE_URL
 
 
 # ── Portal: Setup ────────────────────────────────────────────────────────────
@@ -112,7 +117,7 @@ def send_review_request(
     db.commit()
 
     # Build link and send
-    link = f"{BASE_URL}/r/{code}"
+    link = f"{get_base_url()}/r/{code}"
 
     if contact_type == "email":
         send_email(
@@ -226,4 +231,26 @@ def review_landing(code: str, request: Request, db: Session = Depends(get_db)):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.getenv("PORT", "8000"))
+
+    # Auto-create public tunnel via ngrok (if no BASE_URL explicitly set)
+    if not os.getenv("BASE_URL"):
+        try:
+            from pyngrok import ngrok
+
+            authtoken = os.getenv("NGROK_AUTHTOKEN")
+            if authtoken:
+                ngrok.set_auth_token(authtoken)
+
+            public_url = ngrok.connect(port).public_url
+            BASE_URL = public_url
+            print(f"\n{'='*50}")
+            print(f"  Public URL: {public_url}")
+            print(f"  Portal:     {public_url}/portal/setup")
+            print(f"{'='*50}\n")
+        except Exception as e:
+            print(f"[ngrok] Failed to start tunnel: {e}")
+            print("[ngrok] Install: pip install pyngrok")
+            print("[ngrok] Or set BASE_URL env var to your public URL")
+
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
