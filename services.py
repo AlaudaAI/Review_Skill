@@ -67,7 +67,12 @@ def send_sms(to: str, body: str) -> bool:
     if not all([sid, token, from_num]):
         print(f"[SMS SKIP] Twilio not configured. To: {to} | Body: {body}")
         return False
-    from twilio.rest import Client
+    try:
+        from twilio.rest import Client
 
-    Client(sid, token).messages.create(body=body, from_=from_num, to=to)
-    return True
+        msg = Client(sid, token).messages.create(body=body, from_=from_num, to=to)
+        print(f"[SMS SENT] To: {to} | SID: {msg.sid} | Status: {msg.status}")
+        return True
+    except Exception as e:
+        print(f"[SMS ERROR] To: {to} | Error: {e}")
+        return False
