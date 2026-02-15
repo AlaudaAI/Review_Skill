@@ -23,12 +23,9 @@ app = FastAPI(title="Review Boost")
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 
-# Will be set dynamically by ngrok tunnel at startup, or from env
-BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
-
-
 def get_base_url() -> str:
-    return BASE_URL
+    """Read BASE_URL from env each time — picks up ngrok URL set by parent process."""
+    return os.getenv("BASE_URL") or "http://localhost:8000"
 
 
 # ── Portal: Setup ────────────────────────────────────────────────────────────
@@ -233,8 +230,11 @@ if __name__ == "__main__":
 
     port = int(os.getenv("PORT", "8000"))
 
-    # Auto-create public tunnel via ngrok (if no BASE_URL explicitly set)
-    if not os.getenv("BASE_URL"):
+    # Auto-create public tunnel via ngrok when BASE_URL is not a real public URL
+    base = os.getenv("BASE_URL", "").strip()
+    is_local = not base or "localhost" in base or "127.0.0.1" in base
+
+    if is_local:
         try:
             from pyngrok import ngrok
 
@@ -243,14 +243,14 @@ if __name__ == "__main__":
                 ngrok.set_auth_token(authtoken)
 
             public_url = ngrok.connect(port).public_url
-            BASE_URL = public_url
+            # Set env var so uvicorn child process inherits it
+            os.environ["BASE_URL"] = public_url
             print(f"\n{'='*50}")
             print(f"  Public URL: {public_url}")
             print(f"  Portal:     {public_url}/portal/setup")
             print(f"{'='*50}\n")
         except Exception as e:
-            print(f"[ngrok] Failed to start tunnel: {e}")
-            print("[ngrok] Install: pip install pyngrok")
-            print("[ngrok] Or set BASE_URL env var to your public URL")
+            print(f"[ngrok] Failed: {e}")
+            print("[ngrok] Fix: pip install pyngrok && ngrok config add-authtoken <token>")
 
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
