@@ -117,7 +117,7 @@ def send_review_request(
     link = f"{get_base_url()}/r/{code}"
 
     if contact_type == "email":
-        send_email(
+        sent = send_email(
             to=customer_contact.strip(),
             subject=f"{biz.name} would love your review!",
             body=(
@@ -129,7 +129,7 @@ def send_review_request(
             ),
         )
     else:
-        send_sms(
+        sent = send_sms(
             to=customer_contact.strip(),
             body=(
                 f"Hi {customer_name}! Thanks for visiting {biz.name}. "
@@ -137,15 +137,27 @@ def send_review_request(
             ),
         )
 
-    return templates.TemplateResponse(
-        "send.html",
-        {
-            "request": request,
-            "businesses": businesses,
-            "result": "ok",
-            "message": f"Sent to {customer_contact} via {contact_type}. Link: {link}",
-        },
-    )
+    if sent:
+        return templates.TemplateResponse(
+            "send.html",
+            {
+                "request": request,
+                "businesses": businesses,
+                "result": "ok",
+                "message": f"Sent to {customer_contact} via {contact_type}. Link: {link}",
+            },
+        )
+    else:
+        hint = "Set SMTP_USER and SMTP_PASSWORD in .env" if contact_type == "email" else "Set TWILIO vars in .env"
+        return templates.TemplateResponse(
+            "send.html",
+            {
+                "request": request,
+                "businesses": businesses,
+                "result": "error",
+                "message": f"{contact_type.upper()} not configured. {hint}",
+            },
+        )
 
 
 # ── Portal: Dashboard ────────────────────────────────────────────────────────

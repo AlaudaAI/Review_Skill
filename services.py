@@ -1,6 +1,9 @@
 import os
 import secrets
+import smtplib
 import string
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 import anthropic
 
@@ -31,20 +34,29 @@ def generate_review_text(business_name: str) -> str:
 
 
 def send_email(to: str, subject: str, body: str) -> bool:
-    api_key = os.getenv("SENDGRID_API_KEY")
-    if not api_key:
-        print(f"[EMAIL MOCK] To: {to} | Subject: {subject} | Body: {body}")
-        return True
-    from sendgrid import SendGridAPIClient
-    from sendgrid.helpers.mail import Mail
+    """Send email via SMTP (e.g. Gmail). No third-party SDK needed."""
+    smtp_user = os.getenv("SMTP_USER", "").strip()
+    smtp_pass = os.getenv("SMTP_PASSWORD", "").strip()
+    if not smtp_user or not smtp_pass:
+        print(f"[EMAIL SKIP] SMTP not configured. To: {to} | Subject: {subject}")
+        return False
 
-    msg = Mail(
-        from_email=os.getenv("FROM_EMAIL", "reviews@example.com"),
-        to_emails=to,
-        subject=subject,
-        html_content=body,
-    )
-    SendGridAPIClient(api_key).send(msg)
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+    from_email = os.getenv("FROM_EMAIL", smtp_user)
+
+    msg = MIMEMultipart("alternative")
+    msg["From"] = from_email
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "html"))
+
+    with smtplib.SMTP(smtp_host, smtp_port) as server:
+        server.starttls()
+        server.login(smtp_user, smtp_pass)
+        server.sendmail(from_email, to, msg.as_string())
+
+    print(f"[EMAIL SENT] To: {to} | Subject: {subject}")
     return True
 
 
@@ -53,8 +65,8 @@ def send_sms(to: str, body: str) -> bool:
     token = os.getenv("TWILIO_AUTH_TOKEN")
     from_num = os.getenv("TWILIO_FROM_NUMBER")
     if not all([sid, token, from_num]):
-        print(f"[SMS MOCK] To: {to} | Body: {body}")
-        return True
+        print(f"[SMS SKIP] Twilio not configured. To: {to} | Body: {body}")
+        return False
     from twilio.rest import Client
 
     Client(sid, token).messages.create(body=body, from_=from_num, to=to)
