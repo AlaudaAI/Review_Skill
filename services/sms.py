@@ -74,25 +74,13 @@ def _send_via_twilio(to: str, body: str) -> bool:
 
 
 def send_sms(to: str, body: str, carrier: str = "") -> bool:
-    """Send SMS. Backend chosen by SMS_BACKEND env var: twilio, email, auto (default)."""
-    backend = os.getenv("SMS_BACKEND", "auto").lower()
+    """Send SMS. Backend chosen by SMS_BACKEND env var: twilio or email."""
+    backend = os.getenv("SMS_BACKEND", "twilio").lower()
 
     if backend == "twilio":
         return _send_via_twilio(to, body)
 
-    if backend == "email":
-        if not carrier:
-            print(f"[SMS SKIP] email backend requires carrier. To: {to}")
-            return False
-        return _send_sms_via_email(to, body, carrier)
-
-    # auto: try twilio first, fall back to email gateway
-    if _send_via_twilio(to, body):
-        return True
-
-    if carrier:
-        print(f"[SMS] Falling back to email gateway (carrier={carrier})")
-        return _send_sms_via_email(to, body, carrier)
-
-    print(f"[SMS SKIP] No Twilio and no carrier specified. To: {to}")
-    return False
+    if not carrier:
+        print(f"[SMS SKIP] email backend requires carrier. To: {to}")
+        return False
+    return _send_sms_via_email(to, body, carrier)
