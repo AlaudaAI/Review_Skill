@@ -29,23 +29,25 @@
 </head>
 <body class="bg-white grid-bg min-h-screen font-satoshi text-charcoal">
     <nav class="bg-charcoal">
-        <div class="max-w-3xl mx-auto px-4 py-3 flex items-center gap-6">
-            <span class="font-bold text-charcoal highlight">ReviewBoost</span>
-            <a href="/portal/send" class="text-sm text-sage hover:text-golden">Send</a>
-            <a href="/portal/dashboard" class="text-sm text-sage hover:text-golden">Dashboard</a>
+        <div class="max-w-3xl mx-auto px-4 py-3 flex items-center">
+            <span class="font-bold text-sage">ReviewBoost</span>
+            <div class="ml-auto flex gap-6">
+                <a href="/portal/send" class="text-sm text-sage hover:text-golden">Send</a>
+                <a href="/portal/dashboard" class="text-sm text-sage hover:text-golden">Dashboard</a>
+            </div>
         </div>
     </nav>
     <main class="max-w-3xl mx-auto px-4 py-8">
         <h1 class="text-3xl font-anton uppercase leading-[0.9] mb-6">Dashboard</h1>
 
-        <div class="mb-6 flex items-end gap-3">
+        <div class="mb-6 flex items-center gap-3">
             <div>
                 <label class="block text-sm font-medium text-charcoal mb-1">Business</label>
                 <select id="biz-select" class="border border-charcoal/10 rounded px-3 py-2 text-sm focus:ring-golden focus:border-golden">
                     <option value="">-- Select --</option>
                 </select>
             </div>
-            <button onclick="loadDashboard()" class="bg-charcoal/10 text-charcoal px-4 py-2 rounded text-sm hover:bg-charcoal/20">View</button>
+            <button onclick="loadDashboard()" class="bg-charcoal/10 text-charcoal px-4 py-2 rounded text-sm hover:bg-charcoal/20 mt-5">View</button>
         </div>
 
         <div id="stats-section" class="hidden">
