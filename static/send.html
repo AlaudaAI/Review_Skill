@@ -236,11 +236,20 @@ function showPreview(data) {
 
     const container = document.getElementById('preview-reviews');
     container.innerHTML = data.reviews.map((r, i) => `
-        <div class="border border-charcoal/10 rounded p-4">
-            <div class="text-sm font-medium text-dark/50 mb-2">${r.phone}</div>
-            <textarea id="review-text-${i}" rows="3"
-                      class="w-full border border-charcoal/10 rounded px-3 py-2 text-sm focus:ring-golden focus:border-golden resize-y"
-            >${r.review_text}</textarea>
+        <div class="border border-charcoal/10 rounded p-4 space-y-3">
+            <div class="text-sm font-medium text-dark/50">${r.phone}</div>
+            <div>
+                <label class="block text-xs font-medium text-dark/40 mb-1">SMS Message (sent to customer)</label>
+                <textarea id="sms-body-${i}" rows="2"
+                          class="w-full border border-charcoal/10 rounded px-3 py-2 text-sm focus:ring-golden focus:border-golden resize-y"
+                >${r.sms_body}</textarea>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-dark/40 mb-1">Review Content (shown on landing page)</label>
+                <textarea id="review-text-${i}" rows="3"
+                          class="w-full border border-charcoal/10 rounded px-3 py-2 text-sm focus:ring-golden focus:border-golden resize-y"
+                >${r.review_text}</textarea>
+            </div>
         </div>
     `).join('');
 
@@ -261,9 +270,10 @@ async function sendReviews() {
     btn.disabled = true;
     btn.textContent = 'Sending...';
 
-    // Collect edited review texts
+    // Collect edited content
     const reviews = generatedData.reviews.map((r, i) => ({
-        phone: r.phone,
+        id: r.id,
+        sms_body: document.getElementById(`sms-body-${i}`).value,
         review_text: document.getElementById(`review-text-${i}`).value,
     }));
 
@@ -272,7 +282,6 @@ async function sendReviews() {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
-                google_link: document.getElementById('google-link').value,
                 reviews: reviews,
                 carrier: document.getElementById('carrier').value,
             }),

@@ -42,41 +42,13 @@ def list_businesses(db: Session = Depends(get_db)):
 
 
 @router.post("/generate")
-def generate_reviews(payload: dict):
-    """Resolve business and generate review texts for preview/editing."""
+def generate_reviews(payload: dict, db: Session = Depends(get_db)):
+    """Resolve business, generate reviews, create DB records with real links."""
     google_link = (payload.get("google_link") or "").strip()
     phones = [p.strip() for p in payload.get("phones", []) if p.strip()]
 
     if not phones:
         return JSONResponse({"error": "At least one phone number is required."}, status_code=400)
-
-    place = resolve_google_place(google_link)
-    if not place:
-        return JSONResponse(
-            {"error": "Could not resolve Google link. Check GOOGLE_MAPS_API_KEY and the link."},
-            status_code=400,
-        )
-
-    reviews = []
-    for phone in phones:
-        review_text = generate_review_text(place["name"])
-        reviews.append({"phone": phone, "review_text": review_text})
-
-    return {
-        "business_name": place["name"],
-        "place_id": place["place_id"],
-        "reviews": reviews,
-    }
-
-
-@router.post("/send")
-def send_review(payload: dict, db: Session = Depends(get_db)):
-    google_link = (payload.get("google_link") or "").strip()
-    reviews = payload.get("reviews", [])  # [{phone, review_text}, ...]
-    carrier = (payload.get("carrier") or "").strip()
-
-    if not reviews:
-        return JSONResponse({"error": "No reviews to send."}, status_code=400)
 
     place = resolve_google_place(google_link)
     if not place:
@@ -92,16 +64,14 @@ def send_review(payload: dict, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(biz)
 
-    sent_to: list[str] = []
-    failed: list[str] = []
-    errors: list[str] = []
-    for item in reviews:
-        phone = (item.get("phone") or "").strip()
-        review_text = (item.get("review_text") or "").strip()
-        if not phone or not review_text:
-            continue
-
+    base = _base_url()
+    reviews = []
+    for phone in phones:
+        review_text = generate_review_text(biz.name)
         code = generate_short_code()
+        link = f"{base}/r/{code}"
+        sms_body = f"Thanks for visiting {biz.name}! We'd love a quick Google review: {link}"
+
         rr = ReviewRequest(
             business_id=biz.id,
             customer_name="",
@@ -109,23 +79,60 @@ def send_review(payload: dict, db: Session = Depends(get_db)):
             contact_type="sms",
             short_code=code,
             review_text=review_text,
-            status="sent",
-            sent_at=datetime.now(timezone.utc),
+            status="pending",
         )
         db.add(rr)
         db.commit()
+        db.refresh(rr)
 
-        link = f"{_base_url()}/r/{code}"
-        result = send_sms(
-            to=phone,
-            body=f"Thanks for visiting {biz.name}! We'd love a quick Google review: {link}",
-            carrier=carrier,
-        )
+        reviews.append({
+            "id": rr.id,
+            "phone": phone,
+            "review_text": review_text,
+            "sms_body": sms_body,
+            "link": link,
+        })
+
+    return {
+        "business_name": biz.name,
+        "reviews": reviews,
+    }
+
+
+@router.post("/send")
+def send_review(payload: dict, db: Session = Depends(get_db)):
+    """Send previously generated reviews. Accepts edited sms_body and review_text."""
+    items = payload.get("reviews", [])
+    carrier = (payload.get("carrier") or "").strip()
+
+    if not items:
+        return JSONResponse({"error": "No reviews to send."}, status_code=400)
+
+    sent_to: list[str] = []
+    failed: list[str] = []
+    errors: list[str] = []
+    for item in items:
+        rr_id = item.get("id")
+        sms_body = (item.get("sms_body") or "").strip()
+        review_text = (item.get("review_text") or "").strip()
+
+        rr = db.query(ReviewRequest).filter(ReviewRequest.id == rr_id).first()
+        if not rr:
+            continue
+
+        # Apply edits from preview
+        if review_text:
+            rr.review_text = review_text
+        rr.status = "sent"
+        rr.sent_at = datetime.now(timezone.utc)
+        db.commit()
+
+        result = send_sms(to=rr.customer_contact, body=sms_body, carrier=carrier)
         if result["ok"]:
-            sent_to.append(phone)
+            sent_to.append(rr.customer_contact)
         else:
-            failed.append(phone)
-            errors.append(f"{phone}: {result.get('error', 'unknown')}")
+            failed.append(rr.customer_contact)
+            errors.append(f"{rr.customer_contact}: {result.get('error', 'unknown')}")
 
     resp = {"sent": sent_to, "failed": failed}
     if errors:
