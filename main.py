@@ -3,6 +3,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
+from typing import List
+
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -69,23 +71,28 @@ def send_review_request(
     request: Request,
     google_link: str = Form(...),
     customer_name: str = Form(...),
-    customer_contact: str = Form(...),
+    customer_contact: List[str] = Form(...),
     carrier: str = Form(""),
     db: Session = Depends(get_db),
 ):
     businesses = db.query(Business).order_by(Business.name).all()
+    phones = [p.strip() for p in customer_contact if p.strip()]
+
+    if not phones:
+        return templates.TemplateResponse(
+            "send.html",
+            {"request": request, "businesses": businesses,
+             "result": "error", "message": "At least one phone number is required."},
+        )
 
     # Resolve Google link to place_id + name
     place = resolve_google_place(google_link.strip())
     if not place:
         return templates.TemplateResponse(
             "send.html",
-            {
-                "request": request,
-                "businesses": businesses,
-                "result": "error",
-                "message": "Could not resolve Google link. Make sure GOOGLE_MAPS_API_KEY is set in .env and the link is valid.",
-            },
+            {"request": request, "businesses": businesses,
+             "result": "error",
+             "message": "Could not resolve Google link. Make sure GOOGLE_MAPS_API_KEY is set in .env and the link is valid."},
         )
 
     # Find or create Business by place_id
@@ -97,54 +104,47 @@ def send_review_request(
         db.refresh(biz)
         businesses = db.query(Business).order_by(Business.name).all()
 
-    # Generate review text via LLM
-    review_text = generate_review_text(biz.name)
+    # Send to each phone number
+    sent_to: list[str] = []
+    failed: list[str] = []
+    for phone in phones:
+        review_text = generate_review_text(biz.name)
+        code = generate_short_code()
+        rr = ReviewRequest(
+            business_id=biz.id,
+            customer_name=customer_name.strip(),
+            customer_contact=phone,
+            contact_type="sms",
+            short_code=code,
+            review_text=review_text,
+            status="sent",
+            sent_at=datetime.now(timezone.utc),
+        )
+        db.add(rr)
+        db.commit()
 
-    # Create review request record
-    code = generate_short_code()
-    rr = ReviewRequest(
-        business_id=biz.id,
-        customer_name=customer_name.strip(),
-        customer_contact=customer_contact.strip(),
-        contact_type="sms",
-        short_code=code,
-        review_text=review_text,
-        status="sent",
-        sent_at=datetime.now(timezone.utc),
-    )
-    db.add(rr)
-    db.commit()
+        link = f"{get_base_url()}/r/{code}"
+        ok = send_sms(
+            to=phone,
+            body=f"Hi {customer_name}! Thanks for visiting {biz.name}. We'd love a quick Google review: {link}",
+            carrier=carrier.strip(),
+        )
+        (sent_to if ok else failed).append(phone)
 
-    # Build link and send SMS
-    link = f"{get_base_url()}/r/{code}"
-    sent = send_sms(
-        to=customer_contact.strip(),
-        body=(
-            f"Hi {customer_name}! Thanks for visiting {biz.name}. "
-            f"We'd love a quick Google review: {link}"
-        ),
-        carrier=carrier.strip(),
-    )
-
-    if sent:
+    if sent_to:
+        msg = f"SMS sent to {', '.join(sent_to)}."
+        if failed:
+            msg += f" Failed: {', '.join(failed)}."
         return templates.TemplateResponse(
             "send.html",
-            {
-                "request": request,
-                "businesses": businesses,
-                "result": "ok",
-                "message": f"SMS sent to {customer_contact}. Link: {link}",
-            },
+            {"request": request, "businesses": businesses, "result": "ok", "message": msg},
         )
     else:
         return templates.TemplateResponse(
             "send.html",
-            {
-                "request": request,
-                "businesses": businesses,
-                "result": "error",
-                "message": "SMS not configured. Set TWILIO vars in .env (or SMTP + carrier for email gateway).",
-            },
+            {"request": request, "businesses": businesses,
+             "result": "error",
+             "message": "SMS not configured. Set TWILIO vars in .env (or SMTP + carrier for email gateway)."},
         )
 
 
