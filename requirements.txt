@@ -7,3 +7,4 @@ python-dotenv
 anthropic
 pyngrok
 requests
+libsql-experimental

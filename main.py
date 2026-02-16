@@ -35,7 +35,7 @@ def portal_dashboard():
     return FileResponse(_static / "dashboard.html")
 
 
-# ── Entry point ──────────────────────────────────────────────────────────────
+# ── Local dev entry point ────────────────────────────────────────────────────
 if __name__ == "__main__":
     import argparse
     import uvicorn
