@@ -40,14 +40,11 @@
     <main class="max-w-3xl mx-auto px-4 py-8">
         <h1 class="text-3xl font-anton uppercase leading-[0.9] mb-6">Dashboard</h1>
 
-        <div class="mb-6 flex items-end gap-3">
-            <div>
-                <label class="block text-sm font-medium text-charcoal mb-1">Business</label>
-                <select id="biz-select" class="border border-charcoal/10 rounded px-3 py-2 text-sm focus:ring-golden focus:border-golden">
-                    <option value="">-- Select --</option>
-                </select>
-            </div>
-            <button onclick="loadDashboard()" class="bg-charcoal/10 text-charcoal px-3 py-2 rounded text-sm hover:bg-charcoal/20">View</button>
+        <div class="mb-6">
+            <label class="block text-sm font-medium text-charcoal mb-1">Business</label>
+            <select id="biz-select" onchange="loadDashboard()" class="border border-charcoal/10 rounded px-3 py-2 text-sm focus:ring-golden focus:border-golden">
+                <option value="">-- Select --</option>
+            </select>
         </div>
 
         <div id="stats-section" class="hidden">
