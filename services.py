@@ -1,7 +1,11 @@
+import json
 import os
+import re
 import secrets
 import smtplib
 import string
+import urllib.parse
+import urllib.request
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -33,12 +37,150 @@ def generate_review_text(business_name: str) -> str:
     return message.content[0].text.strip()
 
 
-def send_email(to: str, subject: str, body: str) -> bool:
-    """Send email via SMTP (e.g. Gmail). No third-party SDK needed."""
+# ── Google Place Resolution ──────────────────────────────────────────────────
+
+
+def resolve_google_place(google_url: str) -> dict | None:
+    """Resolve a Google Maps URL to {name, place_id}. Uses GOOGLE_API_KEY."""
+    api_key = os.getenv("GOOGLE_API_KEY", "").strip()
+
+    # Ensure URL has a scheme
+    url = google_url.strip()
+    if not url.startswith("http"):
+        url = "https://" + url
+
+    # Step 1: Follow redirects to get full URL (handles goo.gl short links)
+    full_url = _follow_redirects(url) or url
+
+    # Step 2: Try to extract place_id directly from URL
+    place_id = _extract_place_id(full_url)
+    if place_id:
+        name = _extract_name_from_url(full_url) or "Business"
+        if api_key:
+            api_name = _get_place_name(place_id, api_key)
+            if api_name:
+                name = api_name
+        return {"name": name, "place_id": place_id}
+
+    # Step 3: Extract name/query from URL, use Places API to find place_id
+    query = _extract_name_from_url(full_url)
+    coords = _extract_coords(full_url)
+
+    if api_key and query:
+        result = _find_place_from_text(query, coords, api_key)
+        if result:
+            return result
+
+    # Step 4: If we have coords but no name, try reverse geocode style search
+    if api_key and coords and not query:
+        result = _find_place_from_text(f"{coords[0]},{coords[1]}", coords, api_key)
+        if result:
+            return result
+
+    return None
+
+
+def _follow_redirects(url: str) -> str | None:
+    """Follow HTTP redirects and return the final URL."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        resp = urllib.request.urlopen(req, timeout=10)
+        return resp.url
+    except Exception as e:
+        print(f"[RESOLVE] Failed to follow redirects: {e}")
+        return None
+
+
+def _extract_place_id(url: str) -> str | None:
+    """Try to extract a Place ID directly from the URL."""
+    # Pattern: place_id=... or place_id:...
+    m = re.search(r"place_id[=:]([A-Za-z0-9_-]+)", url)
+    if m:
+        return m.group(1)
+    # Pattern in data param: !1sChIJ... (place IDs start with ChIJ)
+    m = re.search(r"!1s(ChIJ[A-Za-z0-9_-]+)", url)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _extract_name_from_url(url: str) -> str | None:
+    """Extract business name or search query from Google Maps URL path."""
+    # /maps/place/BUSINESS_NAME/...
+    m = re.search(r"/maps/place/([^/@]+)", url)
+    if m:
+        return urllib.parse.unquote_plus(m.group(1)).replace("+", " ")
+    # /maps/search/QUERY/...
+    m = re.search(r"/maps/search/([^/@]+)", url)
+    if m:
+        return urllib.parse.unquote_plus(m.group(1)).replace("+", " ")
+    return None
+
+
+def _extract_coords(url: str) -> tuple[float, float] | None:
+    """Extract lat/lng from a Google Maps URL."""
+    m = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+)", url)
+    if m:
+        return (float(m.group(1)), float(m.group(2)))
+    return None
+
+
+def _find_place_from_text(
+    query: str, coords: tuple | None, api_key: str
+) -> dict | None:
+    """Use Google Places 'Find Place from Text' API."""
+    params: dict = {
+        "input": query,
+        "inputtype": "textquery",
+        "fields": "place_id,name",
+        "key": api_key,
+    }
+    if coords:
+        params["locationbias"] = f"point:{coords[0]},{coords[1]}"
+    try:
+        qs = urllib.parse.urlencode(params)
+        url = f"https://maps.googleapis.com/maps/api/place/findplacefromtext/json?{qs}"
+        req = urllib.request.Request(url)
+        resp = urllib.request.urlopen(req, timeout=10)
+        data = json.loads(resp.read())
+        if data.get("candidates"):
+            c = data["candidates"][0]
+            return {"name": c.get("name", query), "place_id": c["place_id"]}
+    except Exception as e:
+        print(f"[RESOLVE] Places API error: {e}")
+    return None
+
+
+def _get_place_name(place_id: str, api_key: str) -> str | None:
+    """Get place name from Place ID via Place Details API."""
+    params = {"place_id": place_id, "fields": "name", "key": api_key}
+    try:
+        qs = urllib.parse.urlencode(params)
+        url = f"https://maps.googleapis.com/maps/api/place/details/json?{qs}"
+        req = urllib.request.Request(url)
+        resp = urllib.request.urlopen(req, timeout=10)
+        data = json.loads(resp.read())
+        return data.get("result", {}).get("name")
+    except Exception as e:
+        print(f"[RESOLVE] Place Details API error: {e}")
+    return None
+
+
+# ── SMS Sending ──────────────────────────────────────────────────────────────
+
+SMS_GATEWAYS = {
+    "tmobile": "tmomail.net",
+    "att": "txt.att.net",
+    "verizon": "vtext.com",
+    "sprint": "messaging.sprintpcs.com",
+}
+
+
+def _send_email_internal(to: str, subject: str, body: str) -> bool:
+    """Internal helper: send email via SMTP (used by SMS gateway fallback)."""
     smtp_user = os.getenv("SMTP_USER", "").strip()
     smtp_pass = os.getenv("SMTP_PASSWORD", "").strip()
     if not smtp_user or not smtp_pass:
-        print(f"[EMAIL SKIP] SMTP not configured. To: {to} | Subject: {subject}")
         return False
 
     smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
@@ -55,40 +197,28 @@ def send_email(to: str, subject: str, body: str) -> bool:
         server.starttls()
         server.login(smtp_user, smtp_pass)
         server.sendmail(from_email, to, msg.as_string())
-
-    print(f"[EMAIL SENT] To: {to} | Subject: {subject}")
     return True
 
 
-SMS_GATEWAYS = {
-    "tmobile": "tmomail.net",      # T-Mobile / Mint / Metro
-    "att": "txt.att.net",           # AT&T / Cricket
-    "verizon": "vtext.com",         # Verizon
-    "sprint": "messaging.sprintpcs.com",  # Sprint / legacy
-}
-
-
-def send_sms_via_email(to: str, body: str, carrier: str) -> bool:
-    """Send SMS through carrier email-to-SMS gateway using existing SMTP."""
+def _send_sms_via_email(to: str, body: str, carrier: str) -> bool:
+    """Send SMS through carrier email-to-SMS gateway."""
     gateway = SMS_GATEWAYS.get(carrier)
     if not gateway:
         print(f"[SMS-GW SKIP] Unknown carrier: {carrier}")
         return False
 
-    # Strip non-digits from phone number
     digits = "".join(c for c in to if c.isdigit())
     if digits.startswith("1") and len(digits) == 11:
-        digits = digits[1:]  # remove country code
+        digits = digits[1:]
     if len(digits) != 10:
         print(f"[SMS-GW ERROR] Invalid US phone number: {to}")
         return False
 
     sms_email = f"{digits}@{gateway}"
     try:
-        # Reuse existing send_email — plain text, no subject needed
-        return send_email(to=sms_email, subject="", body=body)
+        return _send_email_internal(to=sms_email, subject="", body=body)
     except Exception as e:
-        print(f"[SMS-GW ERROR] To: {sms_email} | Error: {e}")
+        print(f"[SMS-GW ERROR] {e}")
         return False
 
 
@@ -98,21 +228,19 @@ def send_sms(to: str, body: str, carrier: str = "") -> bool:
     token = os.getenv("TWILIO_AUTH_TOKEN")
     from_num = os.getenv("TWILIO_FROM_NUMBER")
 
-    # Try Twilio first
     if all([sid, token, from_num]):
         try:
             from twilio.rest import Client
 
             msg = Client(sid, token).messages.create(body=body, from_=from_num, to=to)
-            print(f"[SMS SENT] To: {to} | SID: {msg.sid} | Status: {msg.status}")
+            print(f"[SMS SENT] To: {to} | SID: {msg.sid}")
             return True
         except Exception as e:
             print(f"[SMS ERROR] Twilio failed: {e}")
 
-    # Fall back to email-to-SMS gateway
     if carrier:
         print(f"[SMS] Falling back to email gateway (carrier={carrier})")
-        return send_sms_via_email(to, body, carrier)
+        return _send_sms_via_email(to, body, carrier)
 
     print(f"[SMS SKIP] No Twilio and no carrier specified. To: {to}")
     return False

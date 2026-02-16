@@ -4,7 +4,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from database import Base, engine, get_db
 from models import Business, ReviewRequest
-from services import generate_review_text, generate_short_code, send_email, send_sms
+from services import generate_review_text, generate_short_code, resolve_google_place, send_sms
 
 load_dotenv()
 
@@ -28,42 +28,29 @@ def get_base_url() -> str:
     return os.getenv("BASE_URL") or "http://localhost:8000"
 
 
-# ── Portal: Setup ────────────────────────────────────────────────────────────
+# ── Root ────────────────────────────────────────────────────────────────────
 
 
 @app.get("/", response_class=RedirectResponse)
 def root():
-    return RedirectResponse("/portal/setup")
+    return RedirectResponse("/portal/send")
 
 
-@app.get("/portal/setup", response_class=HTMLResponse)
-def setup_page(request: Request, db: Session = Depends(get_db)):
-    businesses = db.query(Business).order_by(Business.created_at.desc()).all()
-    return templates.TemplateResponse(
-        "setup.html", {"request": request, "businesses": businesses}
+# ── API: Resolve Google Place ───────────────────────────────────────────────
+
+
+@app.get("/api/resolve-place", response_class=JSONResponse)
+def api_resolve_place(url: str):
+    """AJAX endpoint: resolve a Google Maps URL to {name, place_id}."""
+    if not url.strip():
+        return JSONResponse({"error": "URL is required"}, status_code=400)
+    result = resolve_google_place(url.strip())
+    if result:
+        return JSONResponse(result)
+    return JSONResponse(
+        {"error": "Could not resolve place. Check the URL or GOOGLE_API_KEY."},
+        status_code=404,
     )
-
-
-@app.post("/portal/setup", response_class=RedirectResponse)
-def setup_create(
-    name: str = Form(...),
-    google_place_id: str = Form(...),
-    db: Session = Depends(get_db),
-):
-    biz = Business(name=name, google_place_id=google_place_id.strip())
-    db.add(biz)
-    db.commit()
-    return RedirectResponse("/portal/setup", status_code=303)
-
-
-@app.post("/portal/setup/delete/{biz_id}", response_class=RedirectResponse)
-def setup_delete(biz_id: int, db: Session = Depends(get_db)):
-    biz = db.query(Business).filter(Business.id == biz_id).first()
-    if biz:
-        db.query(ReviewRequest).filter(ReviewRequest.business_id == biz_id).delete()
-        db.delete(biz)
-        db.commit()
-    return RedirectResponse("/portal/setup", status_code=303)
 
 
 # ── Portal: Send ─────────────────────────────────────────────────────────────
@@ -80,21 +67,35 @@ def send_page(request: Request, db: Session = Depends(get_db)):
 @app.post("/portal/send", response_class=HTMLResponse)
 def send_review_request(
     request: Request,
-    business_id: int = Form(...),
+    google_link: str = Form(...),
     customer_name: str = Form(...),
     customer_contact: str = Form(...),
-    contact_type: str = Form(...),
     carrier: str = Form(""),
     db: Session = Depends(get_db),
 ):
-    biz = db.query(Business).filter(Business.id == business_id).first()
     businesses = db.query(Business).order_by(Business.name).all()
 
-    if not biz:
+    # Resolve Google link to place_id + name
+    place = resolve_google_place(google_link.strip())
+    if not place:
         return templates.TemplateResponse(
             "send.html",
-            {"request": request, "businesses": businesses, "result": "error", "message": "Business not found."},
+            {
+                "request": request,
+                "businesses": businesses,
+                "result": "error",
+                "message": "Could not resolve Google link. Make sure GOOGLE_API_KEY is set and the link is valid.",
+            },
         )
+
+    # Find or create Business by place_id
+    biz = db.query(Business).filter(Business.google_place_id == place["place_id"]).first()
+    if not biz:
+        biz = Business(name=place["name"], google_place_id=place["place_id"])
+        db.add(biz)
+        db.commit()
+        db.refresh(biz)
+        businesses = db.query(Business).order_by(Business.name).all()
 
     # Generate review text via LLM
     review_text = generate_review_text(biz.name)
@@ -105,7 +106,7 @@ def send_review_request(
         business_id=biz.id,
         customer_name=customer_name.strip(),
         customer_contact=customer_contact.strip(),
-        contact_type=contact_type,
+        contact_type="sms",
         short_code=code,
         review_text=review_text,
         status="sent",
@@ -114,30 +115,16 @@ def send_review_request(
     db.add(rr)
     db.commit()
 
-    # Build link and send
+    # Build link and send SMS
     link = f"{get_base_url()}/r/{code}"
-
-    if contact_type == "email":
-        sent = send_email(
-            to=customer_contact.strip(),
-            subject=f"{biz.name} would love your review!",
-            body=(
-                f"<p>Hi {customer_name},</p>"
-                f"<p>Thanks for visiting <b>{biz.name}</b>! "
-                f"We'd really appreciate a quick Google review.</p>"
-                f'<p><a href="{link}">Leave a review &rarr;</a></p>'
-                f"<p>It only takes a moment. Thank you!</p>"
-            ),
-        )
-    else:
-        sent = send_sms(
-            to=customer_contact.strip(),
-            body=(
-                f"Hi {customer_name}! Thanks for visiting {biz.name}. "
-                f"We'd love a quick Google review: {link}"
-            ),
-            carrier=carrier.strip(),
-        )
+    sent = send_sms(
+        to=customer_contact.strip(),
+        body=(
+            f"Hi {customer_name}! Thanks for visiting {biz.name}. "
+            f"We'd love a quick Google review: {link}"
+        ),
+        carrier=carrier.strip(),
+    )
 
     if sent:
         return templates.TemplateResponse(
@@ -146,21 +133,17 @@ def send_review_request(
                 "request": request,
                 "businesses": businesses,
                 "result": "ok",
-                "message": f"Sent to {customer_contact} via {contact_type}. Link: {link}",
+                "message": f"SMS sent to {customer_contact}. Link: {link}",
             },
         )
     else:
-        if contact_type == "email":
-            hint = "Set SMTP_USER and SMTP_PASSWORD in .env"
-        else:
-            hint = "Set SMTP vars in .env (for email gateway) or TWILIO vars (for Twilio)"
         return templates.TemplateResponse(
             "send.html",
             {
                 "request": request,
                 "businesses": businesses,
                 "result": "error",
-                "message": f"{contact_type.upper()} not configured. {hint}",
+                "message": "SMS not configured. Set TWILIO vars in .env (or SMTP + carrier for email gateway).",
             },
         )
 
@@ -260,11 +243,10 @@ if __name__ == "__main__":
                 ngrok.set_auth_token(authtoken)
 
             public_url = ngrok.connect(port).public_url
-            # Set env var so uvicorn child process inherits it
             os.environ["BASE_URL"] = public_url
             print(f"\n{'='*50}")
             print(f"  Public URL: {public_url}")
-            print(f"  Portal:     {public_url}/portal/setup")
+            print(f"  Portal:     {public_url}/portal/send")
             print(f"{'='*50}\n")
         except Exception as e:
             print(f"[ngrok] Failed: {e}")
