@@ -79,7 +79,9 @@ def generate_reviews(request: Request, payload: dict, db: Session = Depends(get_
 
         rr = ReviewRequest(
             business_id=biz.id,
+            customer_name="",
             customer_contact=phone,
+            contact_type="sms",
             short_code=code,
             review_text=review_text,
             status="pending",

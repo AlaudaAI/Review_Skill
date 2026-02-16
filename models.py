@@ -22,7 +22,9 @@ class ReviewRequest(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     business_id = Column(Integer, ForeignKey("businesses.id"), nullable=False)
+    customer_name = Column(String, nullable=False, default="")
     customer_contact = Column(String, nullable=False)
+    contact_type = Column(String, nullable=False)
     short_code = Column(String, unique=True, index=True, nullable=False)
     review_text = Column(Text, nullable=False)
     status = Column(String, default="pending")  # pending -> sent -> clicked
