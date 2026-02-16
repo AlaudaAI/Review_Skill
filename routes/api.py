@@ -171,6 +171,7 @@ def dashboard_stats(business_id: int, db: Session = Depends(get_db)):
         },
         "reviews": [
             {
+                "id": r.id,
                 "customer_name": r.customer_name,
                 "customer_contact": r.customer_contact,
                 "status": r.status,
@@ -180,6 +181,16 @@ def dashboard_stats(business_id: int, db: Session = Depends(get_db)):
             for r in reviews
         ],
     }
+
+
+@router.delete("/review/{review_id}")
+def delete_review(review_id: int, db: Session = Depends(get_db)):
+    rr = db.query(ReviewRequest).filter(ReviewRequest.id == review_id).first()
+    if not rr:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    db.delete(rr)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/sms-diagnose")

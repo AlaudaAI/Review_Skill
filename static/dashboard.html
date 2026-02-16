@@ -71,6 +71,7 @@
                             <th class="text-left px-4 py-2">Status</th>
                             <th class="text-left px-4 py-2">Sent</th>
                             <th class="text-left px-4 py-2">Clicked</th>
+                            <th class="px-4 py-2"></th>
                         </tr>
                     </thead>
                     <tbody id="reviews-tbody"></tbody>
@@ -86,7 +87,11 @@
 function fmtDate(iso) {
     if (!iso) return '-';
     const d = new Date(iso);
-    return `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    return d.toLocaleString('en-US', {
+        timeZone: 'America/Los_Angeles',
+        month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+    });
 }
 
 function statusBadge(s) {
@@ -105,6 +110,12 @@ async function loadBusinesses() {
         opt.textContent = b.name;
         sel.appendChild(opt);
     });
+}
+
+async function deleteReview(id) {
+    if (!confirm('Delete this review request?')) return;
+    await fetch(`/api/review/${id}`, { method: 'DELETE' });
+    loadDashboard();
 }
 
 async function loadDashboard() {
@@ -129,6 +140,9 @@ async function loadDashboard() {
                 <td class="px-4 py-2">${statusBadge(r.status)}</td>
                 <td class="px-4 py-2 text-dark/40 text-xs">${fmtDate(r.sent_at)}</td>
                 <td class="px-4 py-2 text-dark/40 text-xs">${fmtDate(r.clicked_at)}</td>
+                <td class="px-4 py-2 text-right">
+                    <button onclick="deleteReview(${r.id})" class="text-red-400 hover:text-red-600 text-xs">Delete</button>
+                </td>
             </tr>`
         ).join('');
         document.getElementById('reviews-table').classList.remove('hidden');
