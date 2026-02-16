@@ -3,7 +3,7 @@
 import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -15,8 +15,13 @@ from services import diagnose_sms, generate_review_text, generate_short_code, re
 router = APIRouter(prefix="/api")
 
 
-def _base_url() -> str:
-    return os.getenv("BASE_URL") or "http://localhost:8000"
+def _base_url(request: Request) -> str:
+    env = os.getenv("BASE_URL", "").strip()
+    if env:
+        return env.rstrip("/")
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("host", request.url.netloc)
+    return f"{scheme}://{host}"
 
 
 @router.get("/resolve-place")
@@ -42,7 +47,7 @@ def list_businesses(db: Session = Depends(get_db)):
 
 
 @router.post("/generate")
-def generate_reviews(payload: dict, db: Session = Depends(get_db)):
+def generate_reviews(request: Request, payload: dict, db: Session = Depends(get_db)):
     """Resolve business, generate reviews, create DB records with real links."""
     google_link = (payload.get("google_link") or "").strip()
     phones = [p.strip() for p in payload.get("phones", []) if p.strip()]
@@ -64,7 +69,7 @@ def generate_reviews(payload: dict, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(biz)
 
-    base = _base_url()
+    base = _base_url(request)
     reviews = []
     for phone in phones:
         review_text = generate_review_text(biz.name)
