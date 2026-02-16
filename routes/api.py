@@ -3,20 +3,25 @@
 import os
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Business, ReviewRequest
-from services import generate_review_text, generate_short_code, resolve_google_place, send_sms
+from services import diagnose_sms, generate_review_text, generate_short_code, resolve_google_place, send_sms
 
 router = APIRouter(prefix="/api")
 
 
-def _base_url() -> str:
-    return os.getenv("BASE_URL") or "http://localhost:8000"
+def _base_url(request: Request) -> str:
+    env = os.getenv("BASE_URL", "").strip()
+    if env:
+        return env.rstrip("/")
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("host", request.url.netloc)
+    return f"{scheme}://{host}"
 
 
 @router.get("/resolve-place")
@@ -41,15 +46,12 @@ def list_businesses(db: Session = Depends(get_db)):
     ]
 
 
-@router.post("/send")
-def send_review(payload: dict, db: Session = Depends(get_db)):
+@router.post("/generate")
+def generate_reviews(request: Request, payload: dict, db: Session = Depends(get_db)):
+    """Resolve business, generate reviews, create DB records with real links."""
     google_link = (payload.get("google_link") or "").strip()
-    customer_name = (payload.get("customer_name") or "").strip()
     phones = [p.strip() for p in payload.get("phones", []) if p.strip()]
-    carrier = (payload.get("carrier") or "").strip()
 
-    if not customer_name:
-        return JSONResponse({"error": "Customer name is required."}, status_code=400)
     if not phones:
         return JSONResponse({"error": "At least one phone number is required."}, status_code=400)
 
@@ -67,33 +69,80 @@ def send_review(payload: dict, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(biz)
 
-    sent_to: list[str] = []
-    failed: list[str] = []
+    base = _base_url(request)
+    reviews = []
     for phone in phones:
         review_text = generate_review_text(biz.name)
         code = generate_short_code()
+        link = f"{base}/r/{code}"
+        sms_body = f"Thanks for visiting {biz.name}! We'd love a quick Google review: {link}"
+
         rr = ReviewRequest(
             business_id=biz.id,
-            customer_name=customer_name,
+            customer_name="",
             customer_contact=phone,
             contact_type="sms",
             short_code=code,
             review_text=review_text,
-            status="sent",
-            sent_at=datetime.now(timezone.utc),
+            status="pending",
         )
         db.add(rr)
         db.commit()
+        db.refresh(rr)
 
-        link = f"{_base_url()}/r/{code}"
-        ok = send_sms(
-            to=phone,
-            body=f"Hi {customer_name}! Thanks for visiting {biz.name}. We'd love a quick Google review: {link}",
-            carrier=carrier,
-        )
-        (sent_to if ok else failed).append(phone)
+        reviews.append({
+            "id": rr.id,
+            "phone": phone,
+            "review_text": review_text,
+            "sms_body": sms_body,
+            "link": link,
+        })
 
-    return {"sent": sent_to, "failed": failed}
+    return {
+        "business_name": biz.name,
+        "reviews": reviews,
+    }
+
+
+@router.post("/send")
+def send_review(payload: dict, db: Session = Depends(get_db)):
+    """Send previously generated reviews. Accepts edited sms_body and review_text."""
+    items = payload.get("reviews", [])
+    carrier = (payload.get("carrier") or "").strip()
+
+    if not items:
+        return JSONResponse({"error": "No reviews to send."}, status_code=400)
+
+    sent_to: list[str] = []
+    failed: list[str] = []
+    errors: list[str] = []
+    for item in items:
+        rr_id = item.get("id")
+        sms_body = (item.get("sms_body") or "").strip()
+        review_text = (item.get("review_text") or "").strip()
+
+        rr = db.query(ReviewRequest).filter(ReviewRequest.id == rr_id).first()
+        if not rr:
+            continue
+
+        # Apply edits from preview
+        if review_text:
+            rr.review_text = review_text
+        rr.status = "sent"
+        rr.sent_at = datetime.now(timezone.utc)
+        db.commit()
+
+        result = send_sms(to=rr.customer_contact, body=sms_body, carrier=carrier)
+        if result["ok"]:
+            sent_to.append(rr.customer_contact)
+        else:
+            failed.append(rr.customer_contact)
+            errors.append(f"{rr.customer_contact}: {result.get('error', 'unknown')}")
+
+    resp = {"sent": sent_to, "failed": failed}
+    if errors:
+        resp["errors"] = errors
+    return resp
 
 
 @router.get("/dashboard")
@@ -131,3 +180,20 @@ def dashboard_stats(business_id: int, db: Session = Depends(get_db)):
             for r in reviews
         ],
     }
+
+
+@router.get("/sms-diagnose")
+def sms_diagnose():
+    """Quick diagnostic: checks SMS backend config and SMTP connectivity."""
+    return diagnose_sms()
+
+
+@router.post("/sms-test")
+def sms_test(payload: dict):
+    """Send a plain-text test SMS (no URL) to verify carrier gateway."""
+    phone = (payload.get("phone") or "").strip()
+    carrier = (payload.get("carrier") or "").strip()
+    if not phone or not carrier:
+        return JSONResponse({"error": "phone and carrier are required"}, status_code=400)
+    result = send_sms(to=phone, body="Test message from ReviewBoost. If you see this, SMS is working!", carrier=carrier)
+    return result

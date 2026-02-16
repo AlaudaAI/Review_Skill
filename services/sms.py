@@ -11,11 +11,12 @@ SMS_GATEWAYS = {
 }
 
 
-def _send_email_internal(to: str, subject: str, body: str) -> bool:
+def _send_email_internal(to: str, subject: str, body: str) -> dict:
+    """Send email. Returns {"ok": True} or {"ok": False, "error": "reason"}."""
     smtp_user = os.getenv("SMTP_USER", "").strip()
     smtp_pass = os.getenv("SMTP_PASSWORD", "").strip()
     if not smtp_user or not smtp_pass:
-        return False
+        return {"ok": False, "error": "SMTP_USER or SMTP_PASSWORD env var is missing"}
 
     smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
@@ -27,60 +28,111 @@ def _send_email_internal(to: str, subject: str, body: str) -> bool:
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "html"))
 
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
-        server.starttls()
-        server.login(smtp_user, smtp_pass)
-        server.sendmail(from_email, to, msg.as_string())
-    return True
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            server.sendmail(from_email, to, msg.as_string())
+        return {"ok": True}
+    except smtplib.SMTPAuthenticationError as e:
+        return {"ok": False, "error": f"SMTP auth failed (check SMTP_USER/SMTP_PASSWORD): {e}"}
+    except smtplib.SMTPException as e:
+        return {"ok": False, "error": f"SMTP error: {e}"}
+    except Exception as e:
+        return {"ok": False, "error": f"Email send error: {e}"}
 
 
-def _send_sms_via_email(to: str, body: str, carrier: str) -> bool:
+def _send_sms_via_email(to: str, body: str, carrier: str) -> dict:
+    """Send SMS via carrier email gateway. Returns {"ok": True/False, "error": ...}."""
     gateway = SMS_GATEWAYS.get(carrier)
     if not gateway:
-        print(f"[SMS-GW SKIP] Unknown carrier: {carrier}")
-        return False
+        return {"ok": False, "error": f"Unknown carrier: '{carrier}'. Supported: {list(SMS_GATEWAYS.keys())}"}
 
     digits = "".join(c for c in to if c.isdigit())
     if digits.startswith("1") and len(digits) == 11:
         digits = digits[1:]
     if len(digits) != 10:
-        print(f"[SMS-GW ERROR] Invalid US phone number: {to}")
-        return False
+        return {"ok": False, "error": f"Invalid US phone number: {to}"}
 
     sms_email = f"{digits}@{gateway}"
-    try:
-        return _send_email_internal(to=sms_email, subject="", body=body)
-    except Exception as e:
-        print(f"[SMS-GW ERROR] {e}")
-        return False
+    result = _send_email_internal(to=sms_email, subject="", body=body)
+    if result["ok"]:
+        print(f"[SMS-GW SENT] To: {to} via {sms_email}")
+    else:
+        print(f"[SMS-GW ERROR] {result['error']}")
+    return result
 
 
-def _send_via_twilio(to: str, body: str) -> bool:
+def _send_via_twilio(to: str, body: str) -> dict:
+    """Send SMS via Twilio. Returns {"ok": True/False, "error": ...}."""
     sid = os.getenv("TWILIO_ACCOUNT_SID")
     token = os.getenv("TWILIO_AUTH_TOKEN")
     from_num = os.getenv("TWILIO_FROM_NUMBER")
     if not all([sid, token, from_num]):
-        print("[SMS ERROR] Twilio env vars not set (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER)")
-        return False
+        return {"ok": False, "error": "Twilio env vars not set (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER)"}
     try:
         from twilio.rest import Client
 
         msg = Client(sid, token).messages.create(body=body, from_=from_num, to=to)
         print(f"[SMS SENT] To: {to} | SID: {msg.sid}")
-        return True
+        return {"ok": True}
     except Exception as e:
-        print(f"[SMS ERROR] Twilio failed: {e}")
-        return False
+        return {"ok": False, "error": f"Twilio failed: {e}"}
 
 
-def send_sms(to: str, body: str, carrier: str = "") -> bool:
-    """Send SMS. Backend chosen by SMS_BACKEND env var: twilio or email."""
+def diagnose_sms() -> dict:
+    """Check SMS backend configuration and SMTP connectivity."""
+    backend = os.getenv("SMS_BACKEND", "twilio").lower()
+    info = {"backend": backend}
+
+    if backend == "twilio":
+        sid = os.getenv("TWILIO_ACCOUNT_SID")
+        token = os.getenv("TWILIO_AUTH_TOKEN")
+        from_num = os.getenv("TWILIO_FROM_NUMBER")
+        info["twilio_configured"] = bool(sid and token and from_num)
+        if not info["twilio_configured"]:
+            info["error"] = "Missing TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_FROM_NUMBER"
+        return info
+
+    # email backend — test SMTP connection
+    smtp_user = os.getenv("SMTP_USER", "").strip()
+    smtp_pass = os.getenv("SMTP_PASSWORD", "").strip()
+    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.getenv("SMTP_PORT", "587"))
+
+    info["smtp_host"] = smtp_host
+    info["smtp_port"] = smtp_port
+    info["smtp_user_set"] = bool(smtp_user)
+    info["smtp_pass_set"] = bool(smtp_pass)
+
+    if not smtp_user or not smtp_pass:
+        info["error"] = "SMTP_USER or SMTP_PASSWORD not set"
+        return info
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_pass)
+            info["smtp_login"] = "ok"
+    except smtplib.SMTPAuthenticationError as e:
+        info["smtp_login"] = "failed"
+        info["error"] = f"SMTP auth failed: {e}"
+    except Exception as e:
+        info["smtp_login"] = "failed"
+        info["error"] = f"SMTP connection error: {e}"
+
+    return info
+
+
+def send_sms(to: str, body: str, carrier: str = "") -> dict:
+    """Send SMS. Backend chosen by SMS_BACKEND env var: twilio or email.
+    Returns {"ok": True/False, "error": "reason"}.
+    """
     backend = os.getenv("SMS_BACKEND", "twilio").lower()
 
     if backend == "twilio":
         return _send_via_twilio(to, body)
 
     if not carrier:
-        print(f"[SMS SKIP] email backend requires carrier. To: {to}")
-        return False
+        return {"ok": False, "error": f"Email backend requires carrier selection. SMS_BACKEND={backend}"}
     return _send_sms_via_email(to, body, carrier)

@@ -67,8 +67,7 @@
                 <table class="w-full text-sm">
                     <thead class="bg-charcoal/5">
                         <tr>
-                            <th class="text-left px-4 py-2">Customer</th>
-                            <th class="text-left px-4 py-2">Contact</th>
+                            <th class="text-left px-4 py-2">Phone</th>
                             <th class="text-left px-4 py-2">Status</th>
                             <th class="text-left px-4 py-2">Sent</th>
                             <th class="text-left px-4 py-2">Clicked</th>
@@ -126,7 +125,6 @@ async function loadDashboard() {
         const tbody = document.getElementById('reviews-tbody');
         tbody.innerHTML = data.reviews.map(r =>
             `<tr class="border-t border-charcoal/10">
-                <td class="px-4 py-2">${r.customer_name}</td>
                 <td class="px-4 py-2 text-dark/50">${r.customer_contact}</td>
                 <td class="px-4 py-2">${statusBadge(r.status)}</td>
                 <td class="px-4 py-2 text-dark/40 text-xs">${fmtDate(r.sent_at)}</td>
