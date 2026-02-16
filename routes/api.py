@@ -79,9 +79,7 @@ def generate_reviews(request: Request, payload: dict, db: Session = Depends(get_
 
         rr = ReviewRequest(
             business_id=biz.id,
-            customer_name="",
             customer_contact=phone,
-            contact_type="sms",
             short_code=code,
             review_text=review_text,
             status="pending",
@@ -172,7 +170,6 @@ def dashboard_stats(business_id: int, db: Session = Depends(get_db)):
         "reviews": [
             {
                 "id": r.id,
-                "customer_name": r.customer_name,
                 "customer_contact": r.customer_contact,
                 "status": r.status,
                 "sent_at": r.sent_at.isoformat() if r.sent_at else None,
