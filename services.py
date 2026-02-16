@@ -252,6 +252,9 @@ def _find_place_from_text(
         req = urllib.request.Request(url)
         resp = urllib.request.urlopen(req, timeout=10)
         data = json.loads(resp.read())
+        print(f"[RESOLVE] Places API response: status={data.get('status')}, "
+              f"candidates={len(data.get('candidates', []))}, "
+              f"error={data.get('error_message', 'none')}")
         if data.get("candidates"):
             c = data["candidates"][0]
             return {"name": c.get("name", query), "place_id": c["place_id"]}
