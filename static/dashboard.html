@@ -4,48 +4,69 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Dashboard - Review Boost</title>
+    <link href="https://fonts.googleapis.com/css2?family=Anton&display=swap" rel="stylesheet">
+    <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400;500;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            charcoal: '#171e19',
+            golden: '#ffe17c',
+            sage: '#b7c6c2',
+            dark: '#272727',
+          },
+          fontFamily: {
+            anton: ['Anton', 'sans-serif'],
+            satoshi: ['Satoshi', 'sans-serif'],
+          },
+        }
+      }
+    }
+    </script>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <nav class="bg-white shadow-sm">
+<body class="bg-white grid-bg min-h-screen font-satoshi text-charcoal">
+    <nav class="bg-charcoal">
         <div class="max-w-3xl mx-auto px-4 py-3 flex items-center gap-6">
-            <span class="font-bold text-blue-600">ReviewBoost</span>
-            <a href="/portal/send" class="text-sm text-gray-600 hover:text-blue-600">Send</a>
-            <a href="/portal/dashboard" class="text-sm text-gray-600 hover:text-blue-600">Dashboard</a>
+            <span class="font-bold text-charcoal highlight">ReviewBoost</span>
+            <a href="/portal/send" class="text-sm text-sage hover:text-golden">Send</a>
+            <a href="/portal/dashboard" class="text-sm text-sage hover:text-golden">Dashboard</a>
         </div>
     </nav>
     <main class="max-w-3xl mx-auto px-4 py-8">
-        <h1 class="text-2xl font-bold mb-6">Dashboard</h1>
+        <h1 class="text-3xl font-anton uppercase leading-[0.9] mb-6">Dashboard</h1>
 
         <div class="mb-6 flex items-end gap-3">
             <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Business</label>
-                <select id="biz-select" class="border rounded px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500">
+                <label class="block text-sm font-medium text-charcoal mb-1">Business</label>
+                <select id="biz-select" class="border border-charcoal/10 rounded px-3 py-2 text-sm focus:ring-golden focus:border-golden">
                     <option value="">-- Select --</option>
                 </select>
             </div>
-            <button onclick="loadDashboard()" class="bg-gray-200 text-gray-700 px-4 py-2 rounded text-sm hover:bg-gray-300">View</button>
+            <button onclick="loadDashboard()" class="bg-charcoal/10 text-charcoal px-4 py-2 rounded text-sm hover:bg-charcoal/20">View</button>
         </div>
 
         <div id="stats-section" class="hidden">
             <div class="grid grid-cols-3 gap-4 mb-8">
-                <div class="bg-white rounded-lg shadow p-4 text-center">
-                    <div id="stat-sent" class="text-2xl font-bold text-blue-600">0</div>
-                    <div class="text-xs text-gray-500">Sent</div>
+                <div class="bg-white rounded-lg shadow p-4 text-center card border border-charcoal/10">
+                    <div id="stat-sent" class="text-2xl font-bold text-charcoal">0</div>
+                    <div class="text-xs text-dark/50">Sent</div>
                 </div>
-                <div class="bg-white rounded-lg shadow p-4 text-center">
+                <div class="bg-white rounded-lg shadow p-4 text-center card border border-charcoal/10">
                     <div id="stat-clicked" class="text-2xl font-bold text-green-600">0</div>
-                    <div class="text-xs text-gray-500">Clicked</div>
+                    <div class="text-xs text-dark/50">Clicked</div>
                 </div>
-                <div class="bg-white rounded-lg shadow p-4 text-center">
-                    <div id="stat-rate" class="text-2xl font-bold text-purple-600">0%</div>
-                    <div class="text-xs text-gray-500">Click Rate</div>
+                <div class="bg-white rounded-lg shadow p-4 text-center card border border-charcoal/10">
+                    <div id="stat-rate" class="text-2xl font-bold text-golden">0%</div>
+                    <div class="text-xs text-dark/50">Click Rate</div>
                 </div>
             </div>
 
-            <div id="reviews-table" class="bg-white rounded-lg shadow overflow-hidden hidden">
+            <div id="reviews-table" class="bg-white rounded-lg shadow overflow-hidden hidden border border-charcoal/10">
                 <table class="w-full text-sm">
-                    <thead class="bg-gray-50">
+                    <thead class="bg-charcoal/5">
                         <tr>
                             <th class="text-left px-4 py-2">Customer</th>
                             <th class="text-left px-4 py-2">Contact</th>
@@ -57,10 +78,10 @@
                     <tbody id="reviews-tbody"></tbody>
                 </table>
             </div>
-            <p id="no-reviews" class="text-gray-400 text-sm hidden">No review requests yet for this business.</p>
+            <p id="no-reviews" class="text-dark/40 text-sm hidden">No review requests yet for this business.</p>
         </div>
 
-        <p id="select-prompt" class="text-gray-400 text-sm">Select a business to view stats.</p>
+        <p id="select-prompt" class="text-dark/40 text-sm">Select a business to view stats.</p>
     </main>
 
 <script>
@@ -72,8 +93,8 @@ function fmtDate(iso) {
 
 function statusBadge(s) {
     if (s === 'clicked') return '<span class="text-green-600 font-medium">Clicked</span>';
-    if (s === 'sent') return '<span class="text-blue-600">Sent</span>';
-    return '<span class="text-gray-400">Pending</span>';
+    if (s === 'sent') return '<span class="text-golden font-medium">Sent</span>';
+    return '<span class="text-dark/40">Pending</span>';
 }
 
 async function loadBusinesses() {
@@ -105,12 +126,12 @@ async function loadDashboard() {
     if (data.reviews.length) {
         const tbody = document.getElementById('reviews-tbody');
         tbody.innerHTML = data.reviews.map(r =>
-            `<tr class="border-t">
+            `<tr class="border-t border-charcoal/10">
                 <td class="px-4 py-2">${r.customer_name}</td>
-                <td class="px-4 py-2 text-gray-500">${r.customer_contact}</td>
+                <td class="px-4 py-2 text-dark/50">${r.customer_contact}</td>
                 <td class="px-4 py-2">${statusBadge(r.status)}</td>
-                <td class="px-4 py-2 text-gray-400 text-xs">${fmtDate(r.sent_at)}</td>
-                <td class="px-4 py-2 text-gray-400 text-xs">${fmtDate(r.clicked_at)}</td>
+                <td class="px-4 py-2 text-dark/40 text-xs">${fmtDate(r.sent_at)}</td>
+                <td class="px-4 py-2 text-dark/40 text-xs">${fmtDate(r.clicked_at)}</td>
             </tr>`
         ).join('');
         document.getElementById('reviews-table').classList.remove('hidden');
