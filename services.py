@@ -41,8 +41,8 @@ def generate_review_text(business_name: str) -> str:
 
 
 def resolve_google_place(google_url: str) -> dict | None:
-    """Resolve a Google Maps URL to {name, place_id}. Uses GOOGLE_API_KEY."""
-    api_key = os.getenv("GOOGLE_API_KEY", "").strip()
+    """Resolve a Google Maps URL to {name, place_id}. Uses GOOGLE_MAPS_API_KEY."""
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
 
     # Ensure URL has a scheme
     url = google_url.strip()
