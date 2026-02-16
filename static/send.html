@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Send Review Request - Review Boost</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <nav class="bg-white shadow-sm">
+        <div class="max-w-3xl mx-auto px-4 py-3 flex items-center gap-6">
+            <span class="font-bold text-blue-600">ReviewBoost</span>
+            <a href="/portal/send" class="text-sm text-gray-600 hover:text-blue-600">Send</a>
+            <a href="/portal/dashboard" class="text-sm text-gray-600 hover:text-blue-600">Dashboard</a>
+        </div>
+    </nav>
+    <main class="max-w-3xl mx-auto px-4 py-8">
+        <h1 class="text-2xl font-bold mb-6">Send Review Request</h1>
+
+        <div id="alert" class="hidden rounded p-3 mb-6 text-sm"></div>
+
+        <form id="send-form" class="bg-white rounded-lg shadow p-6 space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Google Maps Link or Business Name</label>
+                <div class="flex gap-2">
+                    <input type="text" id="google-link" required
+                           class="flex-1 border rounded px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                           placeholder="Paste a Google Maps link or type business name...">
+                    <button type="button" onclick="lookupPlace()"
+                            class="bg-gray-200 text-gray-700 px-3 py-2 rounded text-sm hover:bg-gray-300 whitespace-nowrap">
+                        Lookup
+                    </button>
+                </div>
+                <div id="place-info" class="mt-2 text-sm text-green-700 hidden">
+                    <span id="place-name" class="font-medium"></span>
+                    <span id="place-id" class="text-xs text-gray-400 ml-2 font-mono"></span>
+                </div>
+                <div id="place-error" class="mt-2 text-sm text-red-600 hidden"></div>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Customer Name</label>
+                <input type="text" id="customer-name" required
+                       class="w-full border rounded px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                       placeholder="e.g. John">
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Phone Numbers</label>
+                <div id="phones-list">
+                    <div class="flex gap-2 mb-2">
+                        <input type="tel" class="phone-input flex-1 border rounded px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                               placeholder="e.g. +14155551234" required>
+                        <button type="button" onclick="addPhone()" class="text-blue-600 text-sm hover:underline">+ Add</button>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-1">
+                    Phone Carrier <span class="text-gray-400 font-normal">(optional, for email-gateway fallback)</span>
+                </label>
+                <select id="carrier"
+                        class="w-full border rounded px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500">
+                    <option value="">-- Not needed if Twilio is set up --</option>
+                    <option value="tmobile">T-Mobile / Mint / Metro</option>
+                    <option value="att">AT&T / Cricket</option>
+                    <option value="verizon">Verizon</option>
+                    <option value="sprint">Sprint</option>
+                </select>
+            </div>
+            <button type="submit" id="submit-btn"
+                    class="bg-blue-600 text-white px-4 py-2 rounded text-sm hover:bg-blue-700">
+                Generate & Send SMS
+            </button>
+        </form>
+
+        <div id="biz-section" class="mt-8 hidden">
+            <h2 class="text-lg font-semibold mb-3">Recent Businesses</h2>
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <table class="w-full text-sm">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th class="text-left px-4 py-2">Name</th>
+                            <th class="text-left px-4 py-2">Place ID</th>
+                        </tr>
+                    </thead>
+                    <tbody id="biz-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+<script>
+function showAlert(type, msg) {
+    const el = document.getElementById('alert');
+    el.className = type === 'ok'
+        ? 'rounded p-3 mb-6 text-sm bg-green-50 border border-green-200 text-green-800'
+        : 'rounded p-3 mb-6 text-sm bg-red-50 border border-red-200 text-red-800';
+    el.textContent = msg;
+    el.classList.remove('hidden');
+}
+
+function addPhone() {
+    const div = document.createElement('div');
+    div.className = 'flex gap-2 mb-2';
+    div.innerHTML = `
+        <input type="tel" class="phone-input flex-1 border rounded px-3 py-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+               placeholder="e.g. +14155551234">
+        <button type="button" onclick="this.parentElement.remove()" class="text-red-500 text-sm hover:underline">Remove</button>`;
+    document.getElementById('phones-list').appendChild(div);
+}
+
+async function lookupPlace() {
+    const url = document.getElementById('google-link').value.trim();
+    if (!url) return;
+    const info = document.getElementById('place-info');
+    const error = document.getElementById('place-error');
+    info.classList.add('hidden');
+    error.classList.add('hidden');
+    try {
+        const resp = await fetch(`/api/resolve-place?url=${encodeURIComponent(url)}`);
+        const data = await resp.json();
+        if (resp.ok) {
+            document.getElementById('place-name').textContent = data.name;
+            document.getElementById('place-id').textContent = data.place_id;
+            info.classList.remove('hidden');
+        } else {
+            error.textContent = data.error || 'Could not resolve place.';
+            error.classList.remove('hidden');
+        }
+    } catch (e) {
+        error.textContent = 'Network error. Please try again.';
+        error.classList.remove('hidden');
+    }
+}
+
+async function loadBusinesses() {
+    try {
+        const resp = await fetch('/api/businesses');
+        const list = await resp.json();
+        if (!list.length) return;
+        const tbody = document.getElementById('biz-tbody');
+        tbody.innerHTML = list.map(b =>
+            `<tr class="border-t">
+                <td class="px-4 py-2 font-medium">${b.name}</td>
+                <td class="px-4 py-2 text-gray-500 font-mono text-xs">${b.google_place_id}</td>
+            </tr>`
+        ).join('');
+        document.getElementById('biz-section').classList.remove('hidden');
+    } catch (e) { /* ignore */ }
+}
+
+document.getElementById('send-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = document.getElementById('submit-btn');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+
+    const phones = [...document.querySelectorAll('.phone-input')]
+        .map(el => el.value.trim())
+        .filter(Boolean);
+
+    try {
+        const resp = await fetch('/api/send', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                google_link: document.getElementById('google-link').value,
+                customer_name: document.getElementById('customer-name').value,
+                phones: phones,
+                carrier: document.getElementById('carrier').value,
+            }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            let msg = `SMS sent to ${data.sent.join(', ')}.`;
+            if (data.failed.length) msg += ` Failed: ${data.failed.join(', ')}.`;
+            showAlert('ok', msg);
+            loadBusinesses();
+        } else {
+            showAlert('error', data.error || 'Something went wrong.');
+        }
+    } catch (e) {
+        showAlert('error', 'Network error. Please try again.');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Generate & Send SMS';
+});
+
+loadBusinesses();
+</script>
+</body>
+</html>

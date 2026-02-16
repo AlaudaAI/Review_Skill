@@ -1,69 +1,25 @@
 import json
 import os
 import re
-import secrets
-import smtplib
-import string
 import urllib.parse
 import urllib.request
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-
-import anthropic
-
-
-def generate_short_code(length: int = 7) -> str:
-    alphabet = string.ascii_lowercase + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(length))
-
-
-def generate_review_text(business_name: str) -> str:
-    client = anthropic.Anthropic()
-    message = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
-        max_tokens=200,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"Write a short, natural-sounding 5-star Google review for "
-                    f"a business called '{business_name}'. "
-                    f"Keep it 2-3 sentences, warm and authentic. "
-                    f"No hashtags or emojis. Return only the review text."
-                ),
-            }
-        ],
-    )
-    return message.content[0].text.strip()
-
-
-# ── Google Place Resolution ──────────────────────────────────────────────────
 
 
 def resolve_google_place(user_input: str) -> dict | None:
-    """Resolve a Google Maps URL OR a business name to {name, place_id}.
-
-    Accepts:
-      - Google Maps URL (full or short link)
-      - Plain text business name (e.g. "Joe's Pizza, New York")
-    """
+    """Resolve a Google Maps URL OR a business name to {name, place_id}."""
     api_key = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
     text = user_input.strip()
 
     if not text:
         return None
 
-    # ── Detect if input is a URL or a business name ──
     is_url = text.startswith("http") or "google.com/maps" in text or "goo.gl/" in text
 
     if is_url:
         url = text if text.startswith("http") else "https://" + text
-
-        # Step 1: Follow redirects (handles goo.gl short links)
         full_url = _follow_redirects(url) or url
         print(f"[RESOLVE] Redirected URL: {full_url}")
 
-        # Step 2: Try to extract place_id directly from URL
         place_id = _extract_place_id(full_url)
         if place_id:
             name = _extract_name_from_url(full_url) or "Business"
@@ -73,7 +29,6 @@ def resolve_google_place(user_input: str) -> dict | None:
                     name = api_name
             return {"name": name, "place_id": place_id}
 
-        # Step 3: Extract name from URL, search via Places API
         query = _extract_name_from_url(full_url)
         coords = _extract_coords(full_url)
         print(f"[RESOLVE] Extracted from URL — query: {query}, coords: {coords}")
@@ -88,7 +43,6 @@ def resolve_google_place(user_input: str) -> dict | None:
             if result:
                 return result
     else:
-        # ── Plain text: search by business name directly ──
         print(f"[RESOLVE] Searching by name: {text}")
         if api_key:
             result = _find_place_from_text(text, None, api_key)
@@ -101,20 +55,13 @@ def resolve_google_place(user_input: str) -> dict | None:
 
 
 def _follow_redirects(url: str) -> str | None:
-    """Follow HTTP redirects and return the final Google Maps URL.
-
-    maps.app.goo.gl uses Firebase Dynamic Links which return a 200 HTML page
-    with JS-based redirect (no HTTP 302). To extract the real Maps URL we:
-      1) Request with a social-bot UA — Google returns og:/al: meta tags
-      2) Fall back to browser UA and broad HTML body scanning
-    """
     try:
         import requests as req
     except ImportError:
         print("[RESOLVE] 'requests' not installed — run: pip install requests")
         return None
 
-    # ── Strategy 1: Social bot UA → Google returns Open Graph / App Links tags ──
+    # Strategy 1: Social bot UA
     try:
         resp = req.get(
             url,
@@ -135,7 +82,7 @@ def _follow_redirects(url: str) -> str | None:
     except Exception as e:
         print(f"[RESOLVE] Bot UA request failed: {e}")
 
-    # ── Strategy 2: Browser UA ──
+    # Strategy 2: Browser UA
     try:
         resp = req.get(
             url,
@@ -171,23 +118,15 @@ def _follow_redirects(url: str) -> str | None:
 
 
 def _find_maps_url_in_html(body: str) -> str | None:
-    """Search HTML body for a Google Maps URL using multiple patterns."""
     patterns = [
-        # og:url or al:web:url meta tags (social bot / app links)
         r'<meta[^>]+content="(https://(?:www\.)?google\.[a-z.]+/maps/[^"]+)"',
-        # link rel="alternate" with Maps URL (app deep links)
         r'<link[^>]+href="[^"]*?(https://(?:www\.)?google\.[a-z.]+/maps/[^"&]+)',
-        # Any Google Maps URL (place, search, or bare /maps/)
         r'(https://(?:www\.)?google\.[a-z.]+/maps/(?:place|search)/[^\s"\'<>\\]+)',
         r'(https://(?:www\.)?google\.[a-z.]+/maps/[^\s"\'<>\\]+)',
-        # URL-encoded Google Maps URL
         r'(https%3A%2F%2F(?:www\.)?google\.\w+%2Fmaps%2F[^\s"\'<>]+)',
-        # meta refresh
         r'<meta[^>]+content="\d+;\s*url=(https://[^"]+)"',
-        # JS redirect
         r'window\.location(?:\.href\s*=\s*|\.replace\s*\(\s*|\.assign\s*\(\s*)["\']'
         r'(https://[^"\']+)',
-        # href pointing to maps
         r'href="(https://[^"]*google\.[^"]*\/maps\/[^"]+)"',
     ]
     for pattern in patterns:
@@ -201,12 +140,9 @@ def _find_maps_url_in_html(body: str) -> str | None:
 
 
 def _extract_place_id(url: str) -> str | None:
-    """Try to extract a Place ID directly from the URL."""
-    # Pattern: place_id=... or place_id:...
     m = re.search(r"place_id[=:]([A-Za-z0-9_-]+)", url)
     if m:
         return m.group(1)
-    # Pattern in data param: !1sChIJ... (place IDs start with ChIJ)
     m = re.search(r"!1s(ChIJ[A-Za-z0-9_-]+)", url)
     if m:
         return m.group(1)
@@ -214,12 +150,9 @@ def _extract_place_id(url: str) -> str | None:
 
 
 def _extract_name_from_url(url: str) -> str | None:
-    """Extract business name or search query from Google Maps URL path."""
-    # /maps/place/BUSINESS_NAME/...
     m = re.search(r"/maps/place/([^/@]+)", url)
     if m:
         return urllib.parse.unquote_plus(m.group(1)).replace("+", " ")
-    # /maps/search/QUERY/...
     m = re.search(r"/maps/search/([^/@]+)", url)
     if m:
         return urllib.parse.unquote_plus(m.group(1)).replace("+", " ")
@@ -227,7 +160,6 @@ def _extract_name_from_url(url: str) -> str | None:
 
 
 def _extract_coords(url: str) -> tuple[float, float] | None:
-    """Extract lat/lng from a Google Maps URL."""
     m = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+)", url)
     if m:
         return (float(m.group(1)), float(m.group(2)))
@@ -237,7 +169,6 @@ def _extract_coords(url: str) -> tuple[float, float] | None:
 def _find_place_from_text(
     query: str, coords: tuple | None, api_key: str
 ) -> dict | None:
-    """Use Google Places API (New) Text Search to find a place."""
     body_dict: dict = {"textQuery": query}
     if coords:
         body_dict["locationBias"] = {
@@ -274,7 +205,6 @@ def _find_place_from_text(
 
 
 def _get_place_name(place_id: str, api_key: str) -> str | None:
-    """Get place name from Place ID via Places API (New) Details."""
     try:
         req = urllib.request.Request(
             f"https://places.googleapis.com/v1/places/{place_id}",
@@ -289,83 +219,3 @@ def _get_place_name(place_id: str, api_key: str) -> str | None:
     except Exception as e:
         print(f"[RESOLVE] Place Details API error: {e}")
     return None
-
-
-# ── SMS Sending ──────────────────────────────────────────────────────────────
-
-SMS_GATEWAYS = {
-    "tmobile": "tmomail.net",
-    "att": "txt.att.net",
-    "verizon": "vtext.com",
-    "sprint": "messaging.sprintpcs.com",
-}
-
-
-def _send_email_internal(to: str, subject: str, body: str) -> bool:
-    """Internal helper: send email via SMTP (used by SMS gateway fallback)."""
-    smtp_user = os.getenv("SMTP_USER", "").strip()
-    smtp_pass = os.getenv("SMTP_PASSWORD", "").strip()
-    if not smtp_user or not smtp_pass:
-        return False
-
-    smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    from_email = os.getenv("FROM_EMAIL", smtp_user)
-
-    msg = MIMEMultipart("alternative")
-    msg["From"] = from_email
-    msg["To"] = to
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body, "html"))
-
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
-        server.starttls()
-        server.login(smtp_user, smtp_pass)
-        server.sendmail(from_email, to, msg.as_string())
-    return True
-
-
-def _send_sms_via_email(to: str, body: str, carrier: str) -> bool:
-    """Send SMS through carrier email-to-SMS gateway."""
-    gateway = SMS_GATEWAYS.get(carrier)
-    if not gateway:
-        print(f"[SMS-GW SKIP] Unknown carrier: {carrier}")
-        return False
-
-    digits = "".join(c for c in to if c.isdigit())
-    if digits.startswith("1") and len(digits) == 11:
-        digits = digits[1:]
-    if len(digits) != 10:
-        print(f"[SMS-GW ERROR] Invalid US phone number: {to}")
-        return False
-
-    sms_email = f"{digits}@{gateway}"
-    try:
-        return _send_email_internal(to=sms_email, subject="", body=body)
-    except Exception as e:
-        print(f"[SMS-GW ERROR] {e}")
-        return False
-
-
-def send_sms(to: str, body: str, carrier: str = "") -> bool:
-    """Send SMS via Twilio if configured, otherwise fall back to email gateway."""
-    sid = os.getenv("TWILIO_ACCOUNT_SID")
-    token = os.getenv("TWILIO_AUTH_TOKEN")
-    from_num = os.getenv("TWILIO_FROM_NUMBER")
-
-    if all([sid, token, from_num]):
-        try:
-            from twilio.rest import Client
-
-            msg = Client(sid, token).messages.create(body=body, from_=from_num, to=to)
-            print(f"[SMS SENT] To: {to} | SID: {msg.sid}")
-            return True
-        except Exception as e:
-            print(f"[SMS ERROR] Twilio failed: {e}")
-
-    if carrier:
-        print(f"[SMS] Falling back to email gateway (carrier={carrier})")
-        return _send_sms_via_email(to, body, carrier)
-
-    print(f"[SMS SKIP] No Twilio and no carrier specified. To: {to}")
-    return False
