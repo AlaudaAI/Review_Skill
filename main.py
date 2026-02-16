@@ -6,23 +6,12 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from sqlalchemy import inspect, text
-
 from database import Base, engine
 from routes import api_router, public_router
 
 load_dotenv()
 
 Base.metadata.create_all(bind=engine)
-
-# One-time migration: drop legacy columns removed from the model.
-_drop_cols = [("review_requests", "customer_name"), ("review_requests", "contact_type")]
-_inspector = inspect(engine)
-for _tbl, _col in _drop_cols:
-    if _col in [c["name"] for c in _inspector.get_columns(_tbl)]:
-        with engine.begin() as conn:
-            conn.execute(text(f"ALTER TABLE {_tbl} DROP COLUMN {_col}"))
-del _drop_cols, _inspector
 
 app = FastAPI(title="Review Boost")
 
