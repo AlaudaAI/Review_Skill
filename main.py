@@ -37,9 +37,21 @@ def portal_dashboard():
 
 # ── Entry point ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    import argparse
     import uvicorn
 
-    port = int(os.getenv("PORT", "8000"))
+    parser = argparse.ArgumentParser(description="Review Boost server")
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
+    parser.add_argument(
+        "--sms-backend",
+        choices=["auto", "twilio", "email"],
+        default=os.getenv("SMS_BACKEND", "auto"),
+        help="SMS backend: twilio, email (carrier gateway), or auto (default)",
+    )
+    args = parser.parse_args()
+
+    os.environ["SMS_BACKEND"] = args.sms_backend
+    port = args.port
 
     base = os.getenv("BASE_URL", "").strip()
     is_local = not base or "localhost" in base or "127.0.0.1" in base

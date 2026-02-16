@@ -55,20 +55,40 @@ def _send_sms_via_email(to: str, body: str, carrier: str) -> bool:
         return False
 
 
-def send_sms(to: str, body: str, carrier: str = "") -> bool:
+def _send_via_twilio(to: str, body: str) -> bool:
     sid = os.getenv("TWILIO_ACCOUNT_SID")
     token = os.getenv("TWILIO_AUTH_TOKEN")
     from_num = os.getenv("TWILIO_FROM_NUMBER")
+    if not all([sid, token, from_num]):
+        print("[SMS ERROR] Twilio env vars not set (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER)")
+        return False
+    try:
+        from twilio.rest import Client
 
-    if all([sid, token, from_num]):
-        try:
-            from twilio.rest import Client
+        msg = Client(sid, token).messages.create(body=body, from_=from_num, to=to)
+        print(f"[SMS SENT] To: {to} | SID: {msg.sid}")
+        return True
+    except Exception as e:
+        print(f"[SMS ERROR] Twilio failed: {e}")
+        return False
 
-            msg = Client(sid, token).messages.create(body=body, from_=from_num, to=to)
-            print(f"[SMS SENT] To: {to} | SID: {msg.sid}")
-            return True
-        except Exception as e:
-            print(f"[SMS ERROR] Twilio failed: {e}")
+
+def send_sms(to: str, body: str, carrier: str = "") -> bool:
+    """Send SMS. Backend chosen by SMS_BACKEND env var: twilio, email, auto (default)."""
+    backend = os.getenv("SMS_BACKEND", "auto").lower()
+
+    if backend == "twilio":
+        return _send_via_twilio(to, body)
+
+    if backend == "email":
+        if not carrier:
+            print(f"[SMS SKIP] email backend requires carrier. To: {to}")
+            return False
+        return _send_sms_via_email(to, body, carrier)
+
+    # auto: try twilio first, fall back to email gateway
+    if _send_via_twilio(to, body):
+        return True
 
     if carrier:
         print(f"[SMS] Falling back to email gateway (carrier={carrier})")
