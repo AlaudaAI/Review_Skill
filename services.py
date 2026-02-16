@@ -103,8 +103,10 @@ def resolve_google_place(user_input: str) -> dict | None:
 def _follow_redirects(url: str) -> str | None:
     """Follow HTTP redirects and return the final Google Maps URL.
 
-    Uses the `requests` library for reliable redirect/cookie/session handling.
-    Falls back to parsing HTML body if the final URL isn't a Maps URL.
+    maps.app.goo.gl uses Firebase Dynamic Links which return a 200 HTML page
+    with JS-based redirect (no HTTP 302). To extract the real Maps URL we:
+      1) Request with a social-bot UA — Google returns og:/al: meta tags
+      2) Fall back to browser UA and broad HTML body scanning
     """
     try:
         import requests as req
@@ -112,6 +114,28 @@ def _follow_redirects(url: str) -> str | None:
         print("[RESOLVE] 'requests' not installed — run: pip install requests")
         return None
 
+    # ── Strategy 1: Social bot UA → Google returns Open Graph / App Links tags ──
+    try:
+        resp = req.get(
+            url,
+            allow_redirects=True,
+            timeout=15,
+            headers={"User-Agent": "facebookexternalhit/1.1"},
+        )
+        print(f"[RESOLVE] Bot UA — HTTP {resp.status_code}, final URL: {resp.url}")
+
+        if "google.com/maps" in resp.url:
+            return resp.url
+
+        body = resp.text[:200_000]
+        maps_url = _find_maps_url_in_html(body)
+        if maps_url:
+            print(f"[RESOLVE] Found via bot UA: {maps_url}")
+            return maps_url
+    except Exception as e:
+        print(f"[RESOLVE] Bot UA request failed: {e}")
+
+    # ── Strategy 2: Browser UA ──
     try:
         resp = req.get(
             url,
@@ -127,53 +151,53 @@ def _follow_redirects(url: str) -> str | None:
                 "Accept-Language": "en-US,en;q=0.9",
             },
         )
-        final_url = resp.url
-        print(f"[RESOLVE] HTTP {resp.status_code}, final URL: {final_url}")
+        print(f"[RESOLVE] Browser UA — HTTP {resp.status_code}, final URL: {resp.url}")
 
-        # If redirects landed on a Maps URL, we're done
-        if "google.com/maps" in final_url or "google.co" in final_url and "/maps/" in final_url:
-            return final_url
+        if "google.com/maps" in resp.url:
+            return resp.url
 
-        # Otherwise parse HTML for embedded Maps URL
         body = resp.text[:200_000]
+        maps_url = _find_maps_url_in_html(body)
+        if maps_url:
+            print(f"[RESOLVE] Found via browser UA: {maps_url}")
+            return maps_url
 
-        # 1) Any Google Maps place/search URL in the page
-        m = re.search(
-            r'(https://(?:www\.)?google\.[a-z.]+/maps/(?:place|search)/[^\s"\'<>\\]+)',
-            body,
-        )
-        if m:
-            return urllib.parse.unquote(m.group(1))
-
-        # 2) meta refresh
-        m = re.search(
-            r'<meta[^>]+content="\d+;\s*url=(https://[^"]+)"', body, re.IGNORECASE
-        )
-        if m:
-            return m.group(1)
-
-        # 3) JS redirect — window.location.href/replace/assign
-        m = re.search(
-            r'window\.location(?:\.href\s*=\s*|\.replace\s*\(\s*|\.assign\s*\(\s*)["\']'
-            r'(https://[^"\']+)',
-            body,
-        )
-        if m:
-            return m.group(1)
-
-        # 4) Any href pointing to google maps
-        m = re.search(
-            r'href="(https://[^"]*google\.[^"]*\/maps\/[^"]+)"', body
-        )
-        if m:
-            return urllib.parse.unquote(m.group(1))
-
-        print(f"[RESOLVE] No Maps URL found in body (first 500 chars): {body[:500]}")
-        return final_url
+        print(f"[RESOLVE] No Maps URL found. Body (first 1000 chars): {body[:1000]}")
+        return resp.url
 
     except Exception as e:
-        print(f"[RESOLVE] requests.get failed: {e}")
+        print(f"[RESOLVE] Browser UA request failed: {e}")
         return None
+
+
+def _find_maps_url_in_html(body: str) -> str | None:
+    """Search HTML body for a Google Maps URL using multiple patterns."""
+    patterns = [
+        # og:url or al:web:url meta tags (social bot / app links)
+        r'<meta[^>]+content="(https://(?:www\.)?google\.[a-z.]+/maps/[^"]+)"',
+        # link rel="alternate" with Maps URL (app deep links)
+        r'<link[^>]+href="[^"]*?(https://(?:www\.)?google\.[a-z.]+/maps/[^"&]+)',
+        # Any Google Maps URL (place, search, or bare /maps/)
+        r'(https://(?:www\.)?google\.[a-z.]+/maps/(?:place|search)/[^\s"\'<>\\]+)',
+        r'(https://(?:www\.)?google\.[a-z.]+/maps/[^\s"\'<>\\]+)',
+        # URL-encoded Google Maps URL
+        r'(https%3A%2F%2F(?:www\.)?google\.\w+%2Fmaps%2F[^\s"\'<>]+)',
+        # meta refresh
+        r'<meta[^>]+content="\d+;\s*url=(https://[^"]+)"',
+        # JS redirect
+        r'window\.location(?:\.href\s*=\s*|\.replace\s*\(\s*|\.assign\s*\(\s*)["\']'
+        r'(https://[^"\']+)',
+        # href pointing to maps
+        r'href="(https://[^"]*google\.[^"]*\/maps\/[^"]+)"',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, body, re.IGNORECASE)
+        if m:
+            found = m.group(1)
+            if "%" in found:
+                found = urllib.parse.unquote(found)
+            return found
+    return None
 
 
 def _extract_place_id(url: str) -> str | None:
