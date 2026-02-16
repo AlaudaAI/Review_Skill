@@ -48,7 +48,7 @@ def api_resolve_place(url: str):
     if result:
         return JSONResponse(result)
     return JSONResponse(
-        {"error": "Could not resolve place. Check the URL or GOOGLE_API_KEY."},
+        {"error": "Could not resolve place. Check the URL or GOOGLE_MAPS_API_KEY."},
         status_code=404,
     )
 
@@ -84,7 +84,7 @@ def send_review_request(
                 "request": request,
                 "businesses": businesses,
                 "result": "error",
-                "message": "Could not resolve Google link. Make sure GOOGLE_API_KEY is set and the link is valid.",
+                "message": "Could not resolve Google link. Make sure GOOGLE_MAPS_API_KEY is set in .env and the link is valid.",
             },
         )
 
