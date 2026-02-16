@@ -42,6 +42,7 @@
 
         <div id="alert" class="hidden rounded p-3 mb-6 text-sm"></div>
 
+        <!-- Step 1: Input form -->
         <form id="send-form" class="bg-white rounded-lg shadow p-6 space-y-4 card border border-charcoal/10">
             <div>
                 <label class="block text-sm font-medium text-charcoal mb-1">Google Maps Link or Business Name</label>
@@ -59,12 +60,6 @@
                     <span id="place-id" class="text-xs text-dark/40 ml-2 font-mono"></span>
                 </div>
                 <div id="place-error" class="mt-2 text-sm text-red-600 hidden"></div>
-            </div>
-            <div>
-                <label class="block text-sm font-medium text-charcoal mb-1">Customer Name</label>
-                <input type="text" id="customer-name" required
-                       class="w-full border border-charcoal/10 rounded px-3 py-2 text-sm focus:ring-golden focus:border-golden"
-                       placeholder="e.g. John">
             </div>
             <div>
                 <label class="block text-sm font-medium text-charcoal mb-1">Phone Numbers</label>
@@ -89,11 +84,32 @@
                     <option value="sprint">Sprint</option>
                 </select>
             </div>
-            <button type="submit" id="submit-btn"
+            <button type="submit" id="generate-btn"
                     class="bg-golden text-charcoal px-4 py-2 rounded text-sm hover:bg-golden/90 font-medium">
-                Generate & Send SMS
+                Generate Reviews
             </button>
         </form>
+
+        <!-- Step 2: Preview & Edit -->
+        <div id="preview-section" class="hidden mt-6">
+            <div class="bg-white rounded-lg shadow p-6 card border border-charcoal/10">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold">Preview Reviews</h2>
+                    <span id="preview-biz" class="text-sm text-dark/50"></span>
+                </div>
+                <div id="preview-reviews" class="space-y-4"></div>
+                <div class="flex gap-3 mt-6 pt-4 border-t border-charcoal/10">
+                    <button type="button" onclick="backToEdit()"
+                            class="bg-charcoal/10 text-charcoal px-4 py-2 rounded text-sm hover:bg-charcoal/20 font-medium">
+                        Back
+                    </button>
+                    <button type="button" id="send-btn" onclick="sendReviews()"
+                            class="bg-golden text-charcoal px-4 py-2 rounded text-sm hover:bg-golden/90 font-medium">
+                        Send SMS
+                    </button>
+                </div>
+            </div>
+        </div>
 
         <div id="biz-section" class="mt-8 hidden">
             <h2 class="text-lg font-semibold mb-3">Recent Businesses</h2>
@@ -112,6 +128,9 @@
     </main>
 
 <script>
+// State for the two-step flow
+let generatedData = null;
+
 function showAlert(type, msg) {
     const el = document.getElementById('alert');
     el.className = type === 'ok'
@@ -119,6 +138,10 @@ function showAlert(type, msg) {
         : 'rounded p-3 mb-6 text-sm bg-red-50 border border-red-200 text-red-800';
     el.textContent = msg;
     el.classList.remove('hidden');
+}
+
+function hideAlert() {
+    document.getElementById('alert').classList.add('hidden');
 }
 
 function addPhone() {
@@ -171,15 +194,78 @@ async function loadBusinesses() {
     } catch (e) { /* ignore */ }
 }
 
+// Step 1: Generate reviews
 document.getElementById('send-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const btn = document.getElementById('submit-btn');
+    hideAlert();
+
+    const btn = document.getElementById('generate-btn');
     btn.disabled = true;
-    btn.textContent = 'Sending...';
+    btn.textContent = 'Generating...';
 
     const phones = [...document.querySelectorAll('.phone-input')]
         .map(el => el.value.trim())
         .filter(Boolean);
+
+    try {
+        const resp = await fetch('/api/generate', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                google_link: document.getElementById('google-link').value,
+                phones: phones,
+            }),
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            generatedData = data;
+            showPreview(data);
+        } else {
+            showAlert('error', data.error || 'Failed to generate reviews.');
+        }
+    } catch (e) {
+        showAlert('error', 'Network error. Please try again.');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Generate Reviews';
+});
+
+function showPreview(data) {
+    document.getElementById('send-form').classList.add('hidden');
+    document.getElementById('preview-biz').textContent = data.business_name;
+
+    const container = document.getElementById('preview-reviews');
+    container.innerHTML = data.reviews.map((r, i) => `
+        <div class="border border-charcoal/10 rounded p-4">
+            <div class="text-sm font-medium text-dark/50 mb-2">${r.phone}</div>
+            <textarea id="review-text-${i}" rows="3"
+                      class="w-full border border-charcoal/10 rounded px-3 py-2 text-sm focus:ring-golden focus:border-golden resize-y"
+            >${r.review_text}</textarea>
+        </div>
+    `).join('');
+
+    document.getElementById('preview-section').classList.remove('hidden');
+}
+
+function backToEdit() {
+    document.getElementById('preview-section').classList.add('hidden');
+    document.getElementById('send-form').classList.remove('hidden');
+    generatedData = null;
+}
+
+// Step 2: Send with edited reviews
+async function sendReviews() {
+    hideAlert();
+
+    const btn = document.getElementById('send-btn');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+
+    // Collect edited review texts
+    const reviews = generatedData.reviews.map((r, i) => ({
+        phone: r.phone,
+        review_text: document.getElementById(`review-text-${i}`).value,
+    }));
 
     try {
         const resp = await fetch('/api/send', {
@@ -187,8 +273,7 @@ document.getElementById('send-form').addEventListener('submit', async (e) => {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({
                 google_link: document.getElementById('google-link').value,
-                customer_name: document.getElementById('customer-name').value,
-                phones: phones,
+                reviews: reviews,
                 carrier: document.getElementById('carrier').value,
             }),
         });
@@ -199,6 +284,11 @@ document.getElementById('send-form').addEventListener('submit', async (e) => {
             if (data.failed.length) msg += ` Failed: ${data.failed.join(', ')}.`;
             if (data.errors && data.errors.length) msg += `\nErrors: ${data.errors.join('; ')}`;
             showAlert(data.sent.length ? 'ok' : 'error', msg);
+
+            // Reset to form view
+            document.getElementById('preview-section').classList.add('hidden');
+            document.getElementById('send-form').classList.remove('hidden');
+            generatedData = null;
             loadBusinesses();
         } else {
             showAlert('error', data.error || 'Something went wrong.');
@@ -207,8 +297,8 @@ document.getElementById('send-form').addEventListener('submit', async (e) => {
         showAlert('error', 'Network error. Please try again.');
     }
     btn.disabled = false;
-    btn.textContent = 'Generate & Send SMS';
-});
+    btn.textContent = 'Send SMS';
+}
 
 loadBusinesses();
 </script>

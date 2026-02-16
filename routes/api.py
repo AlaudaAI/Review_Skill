@@ -41,17 +41,42 @@ def list_businesses(db: Session = Depends(get_db)):
     ]
 
 
+@router.post("/generate")
+def generate_reviews(payload: dict):
+    """Resolve business and generate review texts for preview/editing."""
+    google_link = (payload.get("google_link") or "").strip()
+    phones = [p.strip() for p in payload.get("phones", []) if p.strip()]
+
+    if not phones:
+        return JSONResponse({"error": "At least one phone number is required."}, status_code=400)
+
+    place = resolve_google_place(google_link)
+    if not place:
+        return JSONResponse(
+            {"error": "Could not resolve Google link. Check GOOGLE_MAPS_API_KEY and the link."},
+            status_code=400,
+        )
+
+    reviews = []
+    for phone in phones:
+        review_text = generate_review_text(place["name"])
+        reviews.append({"phone": phone, "review_text": review_text})
+
+    return {
+        "business_name": place["name"],
+        "place_id": place["place_id"],
+        "reviews": reviews,
+    }
+
+
 @router.post("/send")
 def send_review(payload: dict, db: Session = Depends(get_db)):
     google_link = (payload.get("google_link") or "").strip()
-    customer_name = (payload.get("customer_name") or "").strip()
-    phones = [p.strip() for p in payload.get("phones", []) if p.strip()]
+    reviews = payload.get("reviews", [])  # [{phone, review_text}, ...]
     carrier = (payload.get("carrier") or "").strip()
 
-    if not customer_name:
-        return JSONResponse({"error": "Customer name is required."}, status_code=400)
-    if not phones:
-        return JSONResponse({"error": "At least one phone number is required."}, status_code=400)
+    if not reviews:
+        return JSONResponse({"error": "No reviews to send."}, status_code=400)
 
     place = resolve_google_place(google_link)
     if not place:
@@ -70,12 +95,16 @@ def send_review(payload: dict, db: Session = Depends(get_db)):
     sent_to: list[str] = []
     failed: list[str] = []
     errors: list[str] = []
-    for phone in phones:
-        review_text = generate_review_text(biz.name)
+    for item in reviews:
+        phone = (item.get("phone") or "").strip()
+        review_text = (item.get("review_text") or "").strip()
+        if not phone or not review_text:
+            continue
+
         code = generate_short_code()
         rr = ReviewRequest(
             business_id=biz.id,
-            customer_name=customer_name,
+            customer_name="",
             customer_contact=phone,
             contact_type="sms",
             short_code=code,
@@ -89,7 +118,7 @@ def send_review(payload: dict, db: Session = Depends(get_db)):
         link = f"{_base_url()}/r/{code}"
         result = send_sms(
             to=phone,
-            body=f"Hi {customer_name}! Thanks for visiting {biz.name}. We'd love a quick Google review: {link}",
+            body=f"Thanks for visiting {biz.name}! We'd love a quick Google review: {link}",
             carrier=carrier,
         )
         if result["ok"]:
