@@ -194,9 +194,11 @@ document.getElementById('send-form').addEventListener('submit', async (e) => {
         });
         const data = await resp.json();
         if (resp.ok) {
-            let msg = `SMS sent to ${data.sent.join(', ')}.`;
+            let msg = '';
+            if (data.sent.length) msg += `SMS sent to ${data.sent.join(', ')}.`;
             if (data.failed.length) msg += ` Failed: ${data.failed.join(', ')}.`;
-            showAlert('ok', msg);
+            if (data.errors && data.errors.length) msg += `\nErrors: ${data.errors.join('; ')}`;
+            showAlert(data.sent.length ? 'ok' : 'error', msg);
             loadBusinesses();
         } else {
             showAlert('error', data.error || 'Something went wrong.');

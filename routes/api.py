@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Business, ReviewRequest
-from services import generate_review_text, generate_short_code, resolve_google_place, send_sms
+from services import diagnose_sms, generate_review_text, generate_short_code, resolve_google_place, send_sms
 
 router = APIRouter(prefix="/api")
 
@@ -69,6 +69,7 @@ def send_review(payload: dict, db: Session = Depends(get_db)):
 
     sent_to: list[str] = []
     failed: list[str] = []
+    errors: list[str] = []
     for phone in phones:
         review_text = generate_review_text(biz.name)
         code = generate_short_code()
@@ -86,14 +87,21 @@ def send_review(payload: dict, db: Session = Depends(get_db)):
         db.commit()
 
         link = f"{_base_url()}/r/{code}"
-        ok = send_sms(
+        result = send_sms(
             to=phone,
             body=f"Hi {customer_name}! Thanks for visiting {biz.name}. We'd love a quick Google review: {link}",
             carrier=carrier,
         )
-        (sent_to if ok else failed).append(phone)
+        if result["ok"]:
+            sent_to.append(phone)
+        else:
+            failed.append(phone)
+            errors.append(f"{phone}: {result.get('error', 'unknown')}")
 
-    return {"sent": sent_to, "failed": failed}
+    resp = {"sent": sent_to, "failed": failed}
+    if errors:
+        resp["errors"] = errors
+    return resp
 
 
 @router.get("/dashboard")
@@ -131,3 +139,9 @@ def dashboard_stats(business_id: int, db: Session = Depends(get_db)):
             for r in reviews
         ],
     }
+
+
+@router.get("/sms-diagnose")
+def sms_diagnose():
+    """Quick diagnostic: checks SMS backend config and SMTP connectivity."""
+    return diagnose_sms()
