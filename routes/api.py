@@ -145,3 +145,14 @@ def dashboard_stats(business_id: int, db: Session = Depends(get_db)):
 def sms_diagnose():
     """Quick diagnostic: checks SMS backend config and SMTP connectivity."""
     return diagnose_sms()
+
+
+@router.post("/sms-test")
+def sms_test(payload: dict):
+    """Send a plain-text test SMS (no URL) to verify carrier gateway."""
+    phone = (payload.get("phone") or "").strip()
+    carrier = (payload.get("carrier") or "").strip()
+    if not phone or not carrier:
+        return JSONResponse({"error": "phone and carrier are required"}, status_code=400)
+    result = send_sms(to=phone, body="Test message from ReviewBoost. If you see this, SMS is working!", carrier=carrier)
+    return result
