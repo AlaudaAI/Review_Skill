@@ -40,43 +40,63 @@ def generate_review_text(business_name: str) -> str:
 # ── Google Place Resolution ──────────────────────────────────────────────────
 
 
-def resolve_google_place(google_url: str) -> dict | None:
-    """Resolve a Google Maps URL to {name, place_id}. Uses GOOGLE_MAPS_API_KEY."""
+def resolve_google_place(user_input: str) -> dict | None:
+    """Resolve a Google Maps URL OR a business name to {name, place_id}.
+
+    Accepts:
+      - Google Maps URL (full or short link)
+      - Plain text business name (e.g. "Joe's Pizza, New York")
+    """
     api_key = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
+    text = user_input.strip()
 
-    # Ensure URL has a scheme
-    url = google_url.strip()
-    if not url.startswith("http"):
-        url = "https://" + url
+    if not text:
+        return None
 
-    # Step 1: Follow redirects to get full URL (handles goo.gl short links)
-    full_url = _follow_redirects(url) or url
+    # ── Detect if input is a URL or a business name ──
+    is_url = text.startswith("http") or "google.com/maps" in text or "goo.gl/" in text
 
-    # Step 2: Try to extract place_id directly from URL
-    place_id = _extract_place_id(full_url)
-    if place_id:
-        name = _extract_name_from_url(full_url) or "Business"
+    if is_url:
+        url = text if text.startswith("http") else "https://" + text
+
+        # Step 1: Follow redirects (handles goo.gl short links)
+        full_url = _follow_redirects(url) or url
+        print(f"[RESOLVE] Redirected URL: {full_url}")
+
+        # Step 2: Try to extract place_id directly from URL
+        place_id = _extract_place_id(full_url)
+        if place_id:
+            name = _extract_name_from_url(full_url) or "Business"
+            if api_key:
+                api_name = _get_place_name(place_id, api_key)
+                if api_name:
+                    name = api_name
+            return {"name": name, "place_id": place_id}
+
+        # Step 3: Extract name from URL, search via Places API
+        query = _extract_name_from_url(full_url)
+        coords = _extract_coords(full_url)
+        print(f"[RESOLVE] Extracted from URL — query: {query}, coords: {coords}")
+
+        if api_key and query:
+            result = _find_place_from_text(query, coords, api_key)
+            if result:
+                return result
+
+        if api_key and coords and not query:
+            result = _find_place_from_text(f"{coords[0]},{coords[1]}", coords, api_key)
+            if result:
+                return result
+    else:
+        # ── Plain text: search by business name directly ──
+        print(f"[RESOLVE] Searching by name: {text}")
         if api_key:
-            api_name = _get_place_name(place_id, api_key)
-            if api_name:
-                name = api_name
-        return {"name": name, "place_id": place_id}
+            result = _find_place_from_text(text, None, api_key)
+            if result:
+                return result
 
-    # Step 3: Extract name/query from URL, use Places API to find place_id
-    query = _extract_name_from_url(full_url)
-    coords = _extract_coords(full_url)
-
-    if api_key and query:
-        result = _find_place_from_text(query, coords, api_key)
-        if result:
-            return result
-
-    # Step 4: If we have coords but no name, try reverse geocode style search
-    if api_key and coords and not query:
-        result = _find_place_from_text(f"{coords[0]},{coords[1]}", coords, api_key)
-        if result:
-            return result
-
+    if not api_key:
+        print("[RESOLVE] GOOGLE_MAPS_API_KEY is not set!")
     return None
 
 
