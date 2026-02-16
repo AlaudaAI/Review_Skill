@@ -81,14 +81,105 @@ def resolve_google_place(google_url: str) -> dict | None:
 
 
 def _follow_redirects(url: str) -> str | None:
-    """Follow HTTP redirects and return the final URL."""
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        resp = urllib.request.urlopen(req, timeout=10)
-        return resp.url
-    except Exception as e:
-        print(f"[RESOLVE] Failed to follow redirects: {e}")
-        return None
+    """Follow HTTP redirects and return the final Google Maps URL.
+
+    Google short links (maps.app.goo.gl) sometimes return a 200 HTML page
+    with a JavaScript/meta-refresh redirect instead of a proper HTTP 302,
+    so we parse the HTML body as a fallback.
+    """
+    import http.client
+    import ssl
+
+    max_redirects = 10
+    current_url = url
+
+    for _ in range(max_redirects):
+        try:
+            parsed = urllib.parse.urlparse(current_url)
+
+            if parsed.scheme == "https":
+                ctx = ssl.create_default_context()
+                conn = http.client.HTTPSConnection(parsed.hostname, timeout=10, context=ctx)
+            else:
+                conn = http.client.HTTPConnection(parsed.hostname, timeout=10)
+
+            path = parsed.path or "/"
+            if parsed.query:
+                path += "?" + parsed.query
+
+            conn.request("GET", path, headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/xhtml+xml",
+                "Accept-Language": "en-US,en;q=0.9",
+            })
+            resp = conn.getresponse()
+
+            # ── Proper HTTP redirect ──
+            if resp.status in (301, 302, 303, 307, 308):
+                location = resp.getheader("Location")
+                conn.close()
+                if not location:
+                    return current_url
+                if location.startswith("/"):
+                    location = f"{parsed.scheme}://{parsed.hostname}{location}"
+                current_url = location
+                continue
+
+            # ── 200 OK ──
+            if resp.status == 200:
+                # Already on a Maps URL? Done.
+                if "/maps/place/" in current_url or "/maps/search/" in current_url:
+                    conn.close()
+                    return current_url
+
+                # Parse HTML body for embedded redirect
+                body = resp.read(100_000).decode("utf-8", errors="ignore")
+                conn.close()
+
+                # 1) Full Maps URL anywhere in the page
+                m = re.search(
+                    r'(https://www\.google\.[a-z.]+/maps/place/[^\s"\'<>\\]+)', body
+                )
+                if m:
+                    return urllib.parse.unquote(m.group(1))
+
+                # 2) <meta http-equiv="refresh" content="0;url=...">
+                m = re.search(
+                    r'<meta[^>]+content="\d+;\s*url=(https://[^"]+)"', body, re.IGNORECASE
+                )
+                if m:
+                    current_url = m.group(1)
+                    continue
+
+                # 3) window.location = "..."
+                m = re.search(
+                    r'window\.location\s*[=.]\s*["\']?(https://[^\s"\'<>]+)', body
+                )
+                if m:
+                    current_url = m.group(1)
+                    continue
+
+                # 4) Generic <a href="https://...google.../maps/...">
+                m = re.search(
+                    r'href="(https://[^"]*google\.[^"]*\/maps\/[^"]+)"', body
+                )
+                if m:
+                    return urllib.parse.unquote(m.group(1))
+
+                return current_url
+
+            conn.close()
+            return current_url
+
+        except Exception as e:
+            print(f"[RESOLVE] Redirect step failed for {current_url}: {e}")
+            return current_url if current_url != url else None
+
+    return current_url
 
 
 def _extract_place_id(url: str) -> str | None:
