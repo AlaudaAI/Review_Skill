@@ -237,42 +237,55 @@ def _extract_coords(url: str) -> tuple[float, float] | None:
 def _find_place_from_text(
     query: str, coords: tuple | None, api_key: str
 ) -> dict | None:
-    """Use Google Places 'Find Place from Text' API."""
-    params: dict = {
-        "input": query,
-        "inputtype": "textquery",
-        "fields": "place_id,name",
-        "key": api_key,
-    }
+    """Use Google Places API (New) Text Search to find a place."""
+    body_dict: dict = {"textQuery": query}
     if coords:
-        params["locationbias"] = f"point:{coords[0]},{coords[1]}"
+        body_dict["locationBias"] = {
+            "circle": {
+                "center": {"latitude": coords[0], "longitude": coords[1]},
+                "radius": 500.0,
+            }
+        }
     try:
-        qs = urllib.parse.urlencode(params)
-        url = f"https://maps.googleapis.com/maps/api/place/findplacefromtext/json?{qs}"
-        req = urllib.request.Request(url)
+        body_bytes = json.dumps(body_dict).encode("utf-8")
+        req = urllib.request.Request(
+            "https://places.googleapis.com/v1/places:searchText",
+            data=body_bytes,
+            headers={
+                "Content-Type": "application/json",
+                "X-Goog-Api-Key": api_key,
+                "X-Goog-FieldMask": "places.id,places.displayName",
+            },
+            method="POST",
+        )
         resp = urllib.request.urlopen(req, timeout=10)
         data = json.loads(resp.read())
-        print(f"[RESOLVE] Places API response: status={data.get('status')}, "
-              f"candidates={len(data.get('candidates', []))}, "
-              f"error={data.get('error_message', 'none')}")
-        if data.get("candidates"):
-            c = data["candidates"][0]
-            return {"name": c.get("name", query), "place_id": c["place_id"]}
+        places = data.get("places", [])
+        print(f"[RESOLVE] Places API (New) response: {len(places)} results")
+        if places:
+            p = places[0]
+            return {
+                "name": p.get("displayName", {}).get("text", query),
+                "place_id": p["id"],
+            }
     except Exception as e:
         print(f"[RESOLVE] Places API error: {e}")
     return None
 
 
 def _get_place_name(place_id: str, api_key: str) -> str | None:
-    """Get place name from Place ID via Place Details API."""
-    params = {"place_id": place_id, "fields": "name", "key": api_key}
+    """Get place name from Place ID via Places API (New) Details."""
     try:
-        qs = urllib.parse.urlencode(params)
-        url = f"https://maps.googleapis.com/maps/api/place/details/json?{qs}"
-        req = urllib.request.Request(url)
+        req = urllib.request.Request(
+            f"https://places.googleapis.com/v1/places/{place_id}",
+            headers={
+                "X-Goog-Api-Key": api_key,
+                "X-Goog-FieldMask": "displayName",
+            },
+        )
         resp = urllib.request.urlopen(req, timeout=10)
         data = json.loads(resp.read())
-        return data.get("result", {}).get("name")
+        return data.get("displayName", {}).get("text")
     except Exception as e:
         print(f"[RESOLVE] Place Details API error: {e}")
     return None
