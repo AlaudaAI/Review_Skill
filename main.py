@@ -1,3 +1,4 @@
+import logging
 import os
 from pathlib import Path
 
@@ -6,7 +7,9 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from database import Base, engine
+logger = logging.getLogger(__name__)
+
+from database import Base, engine, get_configured_base_url
 from routes import api_router, public_router
 
 load_dotenv()
@@ -52,7 +55,7 @@ if __name__ == "__main__":
     os.environ["SMS_BACKEND"] = args.sms_backend
     port = int(os.getenv("PORT", "8000"))
 
-    base = os.getenv("BASE_URL", "").strip()
+    base = get_configured_base_url()
     is_local = not base or "localhost" in base or "127.0.0.1" in base
 
     if is_local:
@@ -65,12 +68,10 @@ if __name__ == "__main__":
 
             public_url = ngrok.connect(port).public_url
             os.environ["BASE_URL"] = public_url
-            print(f"\n{'='*50}")
-            print(f"  Public URL: {public_url}")
-            print(f"  Portal:     {public_url}/portal/send")
-            print(f"{'='*50}\n")
+            logger.info("Public URL: %s", public_url)
+            logger.info("Portal:     %s/portal/send", public_url)
         except Exception as e:
-            print(f"[ngrok] Failed: {e}")
-            print("[ngrok] Fix: pip install pyngrok && ngrok config add-authtoken <token>")
+            logger.warning("ngrok failed: %s", e)
+            logger.warning("Fix: pip install pyngrok && ngrok config add-authtoken <token>")
 
     uvicorn.run("main:app", host="0.0.0.0", port=port)

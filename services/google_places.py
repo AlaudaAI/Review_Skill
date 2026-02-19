@@ -1,8 +1,11 @@
 import json
+import logging
 import os
 import re
 import urllib.parse
 import urllib.request
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_google_place(user_input: str) -> dict | None:
@@ -18,7 +21,7 @@ def resolve_google_place(user_input: str) -> dict | None:
     if is_url:
         url = text if text.startswith("http") else "https://" + text
         full_url = _follow_redirects(url) or url
-        print(f"[RESOLVE] Redirected URL: {full_url}")
+        logger.info("Redirected URL: %s", full_url)
 
         place_id = _extract_place_id(full_url)
         if place_id:
@@ -31,7 +34,7 @@ def resolve_google_place(user_input: str) -> dict | None:
 
         query = _extract_name_from_url(full_url)
         coords = _extract_coords(full_url)
-        print(f"[RESOLVE] Extracted from URL — query: {query}, coords: {coords}")
+        logger.info("Extracted from URL — query: %s, coords: %s", query, coords)
 
         if api_key and query:
             result = _find_place_from_text(query, coords, api_key)
@@ -43,14 +46,14 @@ def resolve_google_place(user_input: str) -> dict | None:
             if result:
                 return result
     else:
-        print(f"[RESOLVE] Searching by name: {text}")
+        logger.info("Searching by name: %s", text)
         if api_key:
             result = _find_place_from_text(text, None, api_key)
             if result:
                 return result
 
     if not api_key:
-        print("[RESOLVE] GOOGLE_MAPS_API_KEY is not set!")
+        logger.warning("GOOGLE_MAPS_API_KEY is not set!")
     return None
 
 
@@ -58,63 +61,38 @@ def _follow_redirects(url: str) -> str | None:
     try:
         import requests as req
     except ImportError:
-        print("[RESOLVE] 'requests' not installed — run: pip install requests")
+        logger.error("'requests' not installed — run: pip install requests")
         return None
 
-    # Strategy 1: Social bot UA
-    try:
-        resp = req.get(
-            url,
-            allow_redirects=True,
-            timeout=15,
-            headers={"User-Agent": "facebookexternalhit/1.1"},
-        )
-        print(f"[RESOLVE] Bot UA — HTTP {resp.status_code}, final URL: {resp.url}")
+    ua_strategies = [
+        ("bot", {"User-Agent": "facebookexternalhit/1.1"}),
+        ("browser", {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept": "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+        }),
+    ]
 
-        if "google.com/maps" in resp.url:
-            return resp.url
+    for label, headers in ua_strategies:
+        try:
+            resp = req.get(url, allow_redirects=True, timeout=15, headers=headers)
+            logger.info("%s UA — HTTP %s, final URL: %s", label, resp.status_code, resp.url)
 
-        body = resp.text[:200_000]
-        maps_url = _find_maps_url_in_html(body)
-        if maps_url:
-            print(f"[RESOLVE] Found via bot UA: {maps_url}")
-            return maps_url
-    except Exception as e:
-        print(f"[RESOLVE] Bot UA request failed: {e}")
+            if "google.com/maps" in resp.url:
+                return resp.url
 
-    # Strategy 2: Browser UA
-    try:
-        resp = req.get(
-            url,
-            allow_redirects=True,
-            timeout=15,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                "Accept": "text/html,application/xhtml+xml",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-        )
-        print(f"[RESOLVE] Browser UA — HTTP {resp.status_code}, final URL: {resp.url}")
+            maps_url = _find_maps_url_in_html(resp.text[:200_000])
+            if maps_url:
+                logger.info("Found via %s UA: %s", label, maps_url)
+                return maps_url
+        except Exception as e:
+            logger.warning("%s UA request failed: %s", label, e)
 
-        if "google.com/maps" in resp.url:
-            return resp.url
-
-        body = resp.text[:200_000]
-        maps_url = _find_maps_url_in_html(body)
-        if maps_url:
-            print(f"[RESOLVE] Found via browser UA: {maps_url}")
-            return maps_url
-
-        print(f"[RESOLVE] No Maps URL found. Body (first 1000 chars): {body[:1000]}")
-        return resp.url
-
-    except Exception as e:
-        print(f"[RESOLVE] Browser UA request failed: {e}")
-        return None
+    return None
 
 
 def _find_maps_url_in_html(body: str) -> str | None:
@@ -192,7 +170,7 @@ def _find_place_from_text(
         resp = urllib.request.urlopen(req, timeout=10)
         data = json.loads(resp.read())
         places = data.get("places", [])
-        print(f"[RESOLVE] Places API (New) response: {len(places)} results")
+        logger.info("Places API response: %d results", len(places))
         if places:
             p = places[0]
             return {
@@ -200,7 +178,7 @@ def _find_place_from_text(
                 "place_id": p["id"],
             }
     except Exception as e:
-        print(f"[RESOLVE] Places API error: {e}")
+        logger.error("Places API error: %s", e)
     return None
 
 
@@ -217,5 +195,5 @@ def _get_place_name(place_id: str, api_key: str) -> str | None:
         data = json.loads(resp.read())
         return data.get("displayName", {}).get("text")
     except Exception as e:
-        print(f"[RESOLVE] Place Details API error: {e}")
+        logger.error("Place Details API error: %s", e)
     return None

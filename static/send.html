@@ -78,10 +78,6 @@
                 <select id="carrier"
                         class="w-full border border-charcoal/10 rounded px-3 py-2 text-sm focus:ring-golden focus:border-golden">
                     <option value="">-- Not needed if Twilio is set up --</option>
-                    <option value="tmobile">T-Mobile / Mint / Metro</option>
-                    <option value="att">AT&T / Cricket</option>
-                    <option value="verizon">Verizon</option>
-                    <option value="sprint">Sprint</option>
                 </select>
             </div>
             <button type="submit" id="generate-btn"
@@ -309,6 +305,21 @@ async function sendReviews() {
     btn.textContent = 'Send SMS';
 }
 
+async function loadCarriers() {
+    try {
+        const resp = await fetch('/api/carriers');
+        const list = await resp.json();
+        const select = document.getElementById('carrier');
+        list.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.value;
+            opt.textContent = c.label;
+            select.appendChild(opt);
+        });
+    } catch (e) { /* ignore */ }
+}
+
+loadCarriers();
 loadBusinesses();
 </script>
 </body>

@@ -1,6 +1,5 @@
 """JSON API endpoints — consumed by the portal frontend."""
 
-import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request
@@ -8,20 +7,25 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from database import get_db
+from database import get_configured_base_url, get_db
 from models import Business, ReviewRequest
-from services import diagnose_sms, generate_review_text, generate_unique_short_code, resolve_google_place, send_sms
+from services import SMS_GATEWAYS, diagnose_sms, generate_review_text, generate_unique_short_code, resolve_google_place, send_sms
 
 router = APIRouter(prefix="/api")
 
 
 def _base_url(request: Request) -> str:
-    env = os.getenv("BASE_URL", "").strip()
+    env = get_configured_base_url()
     if env:
         return env.rstrip("/")
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("host", request.url.netloc)
     return f"{scheme}://{host}"
+
+
+@router.get("/carriers")
+def list_carriers():
+    return [{"value": k, "label": v["label"]} for k, v in SMS_GATEWAYS.items()]
 
 
 @router.get("/resolve-place")
@@ -72,7 +76,13 @@ def generate_reviews(request: Request, payload: dict, db: Session = Depends(get_
     base = _base_url(request)
     reviews = []
     for phone in phones:
-        review_text = generate_review_text(biz.name)
+        try:
+            review_text = generate_review_text(biz.name)
+        except Exception as e:
+            return JSONResponse(
+                {"error": f"Failed to generate review text: {e}"},
+                status_code=502,
+            )
         code = generate_unique_short_code(db)
         link = f"{base}/r/{code}"
         sms_body = f"Thanks for visiting {biz.name}! We'd love a quick Google review: {link}"

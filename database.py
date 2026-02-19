@@ -23,3 +23,8 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def get_configured_base_url() -> str:
+    """Read BASE_URL from environment. Returns empty string if not set."""
+    return os.getenv("BASE_URL", "").strip()

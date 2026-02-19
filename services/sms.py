@@ -1,13 +1,16 @@
+import logging
 import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+logger = logging.getLogger(__name__)
+
 SMS_GATEWAYS = {
-    "tmobile": "tmomail.net",
-    "att": "txt.att.net",
-    "verizon": "vtext.com",
-    "sprint": "messaging.sprintpcs.com",
+    "tmobile": {"gateway": "tmomail.net", "label": "T-Mobile / Mint / Metro"},
+    "att": {"gateway": "txt.att.net", "label": "AT&T / Cricket"},
+    "verizon": {"gateway": "vtext.com", "label": "Verizon"},
+    "sprint": {"gateway": "messaging.sprintpcs.com", "label": "Sprint"},
 }
 
 
@@ -44,9 +47,10 @@ def _send_email_internal(to: str, subject: str, body: str) -> dict:
 
 def _send_sms_via_email(to: str, body: str, carrier: str) -> dict:
     """Send SMS via carrier email gateway. Returns {"ok": True/False, "error": ...}."""
-    gateway = SMS_GATEWAYS.get(carrier)
-    if not gateway:
+    entry = SMS_GATEWAYS.get(carrier)
+    if not entry:
         return {"ok": False, "error": f"Unknown carrier: '{carrier}'. Supported: {list(SMS_GATEWAYS.keys())}"}
+    gateway = entry["gateway"]
 
     digits = "".join(c for c in to if c.isdigit())
     if digits.startswith("1") and len(digits) == 11:
@@ -57,9 +61,9 @@ def _send_sms_via_email(to: str, body: str, carrier: str) -> dict:
     sms_email = f"{digits}@{gateway}"
     result = _send_email_internal(to=sms_email, subject="", body=body)
     if result["ok"]:
-        print(f"[SMS-GW SENT] To: {to} via {sms_email}")
+        logger.info("SMS-GW sent to %s via %s", to, sms_email)
     else:
-        print(f"[SMS-GW ERROR] {result['error']}")
+        logger.error("SMS-GW error: %s", result["error"])
     return result
 
 
@@ -74,7 +78,7 @@ def _send_via_twilio(to: str, body: str) -> dict:
         from twilio.rest import Client
 
         msg = Client(sid, token).messages.create(body=body, from_=from_num, to=to)
-        print(f"[SMS SENT] To: {to} | SID: {msg.sid}")
+        logger.info("SMS sent to %s | SID: %s", to, msg.sid)
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "error": f"Twilio failed: {e}"}
