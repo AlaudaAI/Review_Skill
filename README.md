@@ -52,19 +52,15 @@ See `.env.example` for the full list including optional SMTP settings.
 │   └── index.py             # Vercel serverless entry
 ├── routes/
 │   ├── api.py               # JSON API endpoints
-│   └── public.py            # Landing page & redirects
+│   └── public.py            # Short-link redirect & clipboard copy
 ├── services/
 │   ├── review.py            # AI review generation + short codes
 │   ├── google_places.py     # Google Maps place resolution
 │   └── sms.py               # Twilio / email-gateway SMS
-├── static/
-│   ├── style.css
-│   ├── dashboard.html       # Merchant dashboard
-│   └── send.html            # SMS send form
-└── templates/
-    ├── base.html
-    ├── landing.html          # Customer-facing review page
-    └── setup.html
+└── static/
+    ├── style.css
+    ├── dashboard.html       # Merchant dashboard
+    └── send.html            # SMS send form
 ```
 
 ## API Endpoints
@@ -75,7 +71,7 @@ See `.env.example` for the full list including optional SMTP settings.
 | GET | `/api/resolve-place?url=` | Lookup Google place |
 | POST | `/api/send` | Send review request SMS |
 | GET | `/api/dashboard?business_id=` | Dashboard stats |
-| GET | `/r/{code}` | Customer landing page |
+| GET | `/r/{code}` | Clipboard copy & redirect to Google |
 
 ## Deployment
 
