@@ -8,3 +8,5 @@ anthropic
 pyngrok
 requests
 twilio
+pytest
+httpx
