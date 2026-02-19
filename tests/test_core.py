@@ -8,7 +8,7 @@ def test_generate_reviews(client, db):
     with (
         patch("routes.api.resolve_google_place", return_value={"name": "Test Biz", "place_id": "place123"}),
         patch("routes.api.generate_review_text", return_value="Great place!"),
-        patch("routes.api.generate_short_code", return_value="tstcode"),
+        patch("routes.api.generate_unique_short_code", return_value="tstcode"),
     ):
         resp = client.post("/api/generate", json={
             "google_link": "https://maps.google.com/test",
