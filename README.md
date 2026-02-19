@@ -19,8 +19,8 @@ pip install -r requirements.txt
 cp .env.example .env
 # Fill in your API keys (see below)
 
-# 3. Run
-python main.py
+# 3. Run (choose an SMS backend)
+python main.py --sms-backend twilio   # or: --sms-backend email
 ```
 
 The server starts at `http://localhost:8000`. In local mode it auto-creates an ngrok tunnel for SMS callbacks.
@@ -32,12 +32,13 @@ The server starts at `http://localhost:8000`. In local mode it auto-creates an n
 | `ANTHROPIC_API_KEY` | Claude API key (review text generation) |
 | `GOOGLE_MAPS_API_KEY` | Google Places API key |
 | `DATABASE_URL` | PostgreSQL connection string (defaults to SQLite locally) |
-| `TWILIO_ACCOUNT_SID` | Twilio SID |
-| `TWILIO_AUTH_TOKEN` | Twilio auth token |
-| `TWILIO_FROM_NUMBER` | Twilio sender number |
-| `NGROK_AUTHTOKEN` | For local dev tunneling |
+| `SMS_BACKEND` | `twilio` or `email` (set via CLI locally, env var on Vercel) |
+| `TWILIO_ACCOUNT_SID` | Twilio SID (required when `SMS_BACKEND=twilio`) |
+| `TWILIO_AUTH_TOKEN` | Twilio auth token (required when `SMS_BACKEND=twilio`) |
+| `TWILIO_FROM_NUMBER` | Twilio sender number (required when `SMS_BACKEND=twilio`) |
+| `NGROK_AUTHTOKEN` | For local dev tunneling (optional) |
 
-See `.env.example` for the full list including optional SMTP settings.
+See `.env.example` for the full list including optional SMTP settings for the `email` backend.
 
 ## Project Structure
 
@@ -69,10 +70,22 @@ See `.env.example` for the full list including optional SMTP settings.
 |---|---|---|
 | GET | `/api/businesses` | List all businesses |
 | GET | `/api/resolve-place?url=` | Lookup Google place |
-| POST | `/api/send` | Send review request SMS |
+| POST | `/api/generate` | Resolve business + generate review texts |
+| POST | `/api/send` | Send previously generated review SMS |
+| DELETE | `/api/review/{id}` | Delete a review request |
 | GET | `/api/dashboard?business_id=` | Dashboard stats |
+| GET | `/api/sms-diagnose` | Diagnose SMS backend config |
+| POST | `/api/sms-test` | Send a test SMS |
 | GET | `/r/{code}` | Clipboard copy & redirect to Google |
+
+### Portal Pages
+
+| Path | Description |
+|---|---|
+| `/portal/send` | SMS send form |
+| `/portal/dashboard` | Merchant dashboard |
+| `/` | Redirects to `/portal/send` |
 
 ## Deployment
 
-Deployed on **Vercel** as a Python serverless function. Push to main and Vercel handles the rest. Set environment variables in the Vercel dashboard.
+Deployed on **Vercel** as a Python serverless function (`api/index.py` serves as the entry point). Push to main and Vercel handles the rest. Set environment variables (including `SMS_BACKEND`) in the Vercel dashboard.

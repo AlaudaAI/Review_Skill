@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Business, ReviewRequest
-from services import diagnose_sms, generate_review_text, generate_short_code, resolve_google_place, send_sms
+from services import diagnose_sms, generate_review_text, generate_unique_short_code, resolve_google_place, send_sms
 
 router = APIRouter(prefix="/api")
 
@@ -73,7 +73,7 @@ def generate_reviews(request: Request, payload: dict, db: Session = Depends(get_
     reviews = []
     for phone in phones:
         review_text = generate_review_text(biz.name)
-        code = generate_short_code()
+        code = generate_unique_short_code(db)
         link = f"{base}/r/{code}"
         sms_body = f"Thanks for visiting {biz.name}! We'd love a quick Google review: {link}"
 
