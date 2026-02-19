@@ -43,6 +43,8 @@ if __name__ == "__main__":
     import argparse
     import uvicorn
 
+    logging.basicConfig(level=logging.INFO)
+
     parser = argparse.ArgumentParser(description="Review Boost server")
     parser.add_argument(
         "--sms-backend",
